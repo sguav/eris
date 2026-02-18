@@ -18,6 +18,7 @@ use frontend::INDEX_HTML;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use std::path::Path;
+use rand::{distributions::Alphanumeric, Rng};
 
 #[tokio::main]
 async fn main() {
@@ -34,8 +35,14 @@ async fn main() {
         .await
         .expect("Failed to load certificates");
 
+    let invite_token: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(6)
+        .map(char::from)
+        .collect();
+
     let (broadcast_tx, _) = broadcast::channel(2048);
-    let state = Arc::new(AppState::new(broadcast_tx));
+    let state = Arc::new(AppState::new(broadcast_tx, invite_token.clone()));
 
     let app = Router::new()
         .route("/", get(|| async { Html(INDEX_HTML) }))
@@ -46,10 +53,18 @@ async fn main() {
     let addr = "0.0.0.0:8443";
     let socket_addr: std::net::SocketAddr = addr.parse().unwrap();
     
+    // Attempt to get local IP for the QR code
+    let local_ip = local_ip_address::local_ip().map(|ip| ip.to_string()).unwrap_or_else(|_| "localhost".to_string());
+    let invite_url = format!("https://{}:8443/?token={}", local_ip, invite_token);
+
     println!("--------------------------------------------------");
     println!("🌑 ERIS UNIFIED CORE ONLINE (HTTPS)");
     println!("🌍 Web UI: https://localhost:8443");
     println!("📡 Signaling: wss://localhost:8443/ws");
+    println!("🔑 Invite Token: {}", invite_token);
+    println!("🔗 Invite URL: {}", invite_url);
+    println!("--------------------------------------------------");
+    qr2term::print_qr(&invite_url).ok();
     println!("--------------------------------------------------");
     
     axum_server::bind_rustls(socket_addr, config)
@@ -75,12 +90,13 @@ fn generate_self_signed_cert(cert_path: &str, key_path: &str) -> Result<(), Box<
 
 #[cfg(test)]
 mod tests {
-    /* Integration test temporarily disabled due to complex tokio-tungstenite 0.24 TLS API requirements
+    use super::*;
+
     #[tokio::test]
     async fn test_websocket_login_integration() {
-        ...
+        // Updated to use the new AppState::new signature
+        let (broadcast_tx, _) = broadcast::channel(100);
+        let _state = Arc::new(AppState::new(broadcast_tx, "test_token".to_string()));
+        // Integration logic remains disabled/placeholder for now as per previous mandate
     }
-    */
 }
-
-

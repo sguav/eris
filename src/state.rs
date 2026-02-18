@@ -13,14 +13,16 @@ pub struct AppState {
     pub peers: DashMap<Uuid, Peer>,
     pub broadcast_tx: broadcast::Sender<Protocol>,
     pub history: Mutex<Vec<Protocol>>,
+    pub invite_token: String,
 }
 
 impl AppState {
-    pub fn new(broadcast_tx: broadcast::Sender<Protocol>) -> Self {
+    pub fn new(broadcast_tx: broadcast::Sender<Protocol>, invite_token: String) -> Self {
         Self {
             peers: DashMap::new(),
             broadcast_tx,
             history: Mutex::new(Vec::new()),
+            invite_token,
         }
     }
 

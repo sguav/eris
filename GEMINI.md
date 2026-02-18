@@ -7,6 +7,7 @@ Eris is a self-contained hub that functions as both a WebRTC signaling server an
 - **Architectural Integrity**: Any significant structural or architectural change (e.g., modularization, switching protocols, changing ports) **MUST** be immediately reflected in this document.
 - **Documentation Parity**: Every architectural change must be accompanied by a dedicated commit that updates `GEMINI.md`.
 - **Security First**: Features requiring hardware access (mic/camera) must be served over HTTPS to ensure a Secure Context.
+- **Invite Token**: Access to the WebSocket signaling is protected by a server-generated random token. This token must be provided via the URL (e.g., `?token=...`) to prevent unauthorized connections.
 
 ## Project Overview
 

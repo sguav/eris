@@ -1,21 +1,39 @@
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    extract::State,
+    extract::{State, Query},
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use uuid::Uuid;
+use serde::Deserialize;
 
 use crate::protocol::Protocol;
 use crate::state::{AppState, Peer};
 
+#[derive(Deserialize)]
+pub struct WsQuery {
+    token: Option<String>,
+}
+
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
+    query: Query<WsQuery>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+    if let Some(token) = &query.token {
+        if token == &state.invite_token {
+            return ws.on_upgrade(|socket| handle_socket(socket, state)).into_response();
+        }
+    }
+    
+    // Unauthorized
+    axum::http::Response::builder()
+        .status(axum::http::StatusCode::UNAUTHORIZED)
+        .body(axum::body::Body::empty())
+        .unwrap()
+        .into_response()
 }
 
 pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {

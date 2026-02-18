@@ -258,9 +258,16 @@
 
     function connect() {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host; // This naturally includes the port
+      const host = window.location.host;
+      const urlParams = new URLSearchParams(window.location.search);
+      const token = urlParams.get('token') || prompt("Please enter the invite token:");
       
-      ws = new WebSocket(`${protocol}//${host}/ws`);
+      if (!token) {
+          alert("Invite token required to connect.");
+          return;
+      }
+
+      ws = new WebSocket(`${protocol}//${host}/ws?token=${token}`);
 
       ws.onopen = () => {
         statusDot.className = 'status-dot connected';
