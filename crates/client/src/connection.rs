@@ -7,6 +7,8 @@ use eris_core::Protocol;
 pub struct ConnectionManager {
     broadcast_tx: broadcast::Sender<Protocol>,
     ws_sink: Arc<Mutex<Option<futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, Message>>>>,
+    buffer: Arc<Mutex<Vec<Protocol>>>,
+    is_ready: Arc<Mutex<bool>>,
 }
 
 impl ConnectionManager {
@@ -16,9 +18,22 @@ impl ConnectionManager {
             Self {
                 broadcast_tx: tx,
                 ws_sink: Arc::new(Mutex::new(None)),
+                buffer: Arc::new(Mutex::new(Vec::new())),
+                is_ready: Arc::new(Mutex::new(false)),
             },
             rx,
         )
+    }
+
+    pub async fn set_ready(&self) {
+        let mut ready = self.is_ready.lock().await;
+        *ready = true;
+        
+        // Flush buffer
+        let mut buffer = self.buffer.lock().await;
+        for msg in buffer.drain(..) {
+            let _ = self.broadcast_tx.send(msg);
+        }
     }
 
     pub async fn connect(&self, url: String) -> Result<(), String> {
@@ -28,12 +43,19 @@ impl ConnectionManager {
         *self.ws_sink.lock().await = Some(sink);
         
         let tx = self.broadcast_tx.clone();
+        let buffer = self.buffer.clone();
+        let is_ready = self.is_ready.clone();
         
         tokio::spawn(async move {
             while let Some(Ok(msg)) = stream.next().await {
                 if let Message::Text(text) = msg {
                     if let Ok(protocol_msg) = serde_json::from_str::<Protocol>(&text) {
-                        let _ = tx.send(protocol_msg);
+                        let ready = is_ready.lock().await;
+                        if *ready {
+                            let _ = tx.send(protocol_msg);
+                        } else {
+                            buffer.lock().await.push(protocol_msg);
+                        }
                     }
                 }
             }
@@ -56,8 +78,8 @@ impl ConnectionManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use eris_core::Protocol;
+    use serde_json::json;
 
     #[test]
     fn test_protocol_parsing() {

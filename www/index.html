@@ -393,10 +393,13 @@
     }
 
     if (isTauri) {
-        listen('protocol-msg', (event) => handleProtocolMsg(event.payload));
+        listen('protocol-msg', (event) => handleProtocolMsg(event.payload)).then(() => {
+            invoke('client_ready');
+        });
     }
 
     async function handleProtocolMsg(msg) {
+        console.log("JS: Received Protocol Msg:", msg);
         switch (msg.type) {
             case 'Identify':
                 myId = msg.payload.id;

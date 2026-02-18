@@ -38,6 +38,14 @@ async fn send_protocol(
     state.connection.send(msg).await
 }
 
+#[tauri::command]
+async fn client_ready(
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    state.connection.set_ready().await;
+    Ok(())
+}
+
 fn main() {
     let (connection, mut rx) = ConnectionManager::new();
     let app_state = Arc::new(AppState { connection });
@@ -57,7 +65,7 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![connect_server, send_protocol])
+        .invoke_handler(tauri::generate_handler![connect_server, send_protocol, client_ready])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
