@@ -22,3 +22,17 @@ pub struct PeerInfo {
     pub channel: String,
     pub is_sharing: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_protocol_variants() {
+        // Simple test to ensure variants exist and are usable
+        let login = Protocol::Login { username: "Tester".to_string() };
+        if let Protocol::Login { username } = login {
+            assert_eq!(username, "Tester");
+        }
+    }
+}
