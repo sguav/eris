@@ -15,7 +15,7 @@ The project is organized as a Cargo Workspace for strict separation of concerns 
 
 - **Multi-Platform**: Run as a standalone web server or as a native desktop application.
 - **Dual Connectivity**: 
-    - **Secure (8443)**: HTTPS/WSS with automatic certificate generation for browser hardware access.
+    - **Secure (8443)**: HTTPS/WSS with auto-generated certs for browser hardware access.
     - **Plain (8080)**: HTTP/WS for easy local development and native client compatibility.
 - **Observability**: Standardized, timestamped logging across all components.
 - **Local Resilience**: Native client bypasses TLS validation for local/self-signed environments.
@@ -28,19 +28,18 @@ The project is organized as a Cargo Workspace for strict separation of concerns 
 - Rust (latest stable)
 - Linux dependencies: `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`, `libglib2.0-dev`
 
-### Running the Hub (Server)
+### Running the Project
 
-```bash
-cargo run -p eris
-```
-The server will generate a random **Invite Token** and a **QR Code**. Mobile users can scan the QR code to join instantly.
-
-### Running the Native Client
-
-```bash
-cargo run -p eris-client
-```
-Enter the server address (e.g., `127.0.0.1:8080` or `127.0.0.1:8443`) and the invite token displayed in the server terminal.
+1. **Start the Hub (Server)**:
+   ```bash
+   cargo run -p eris
+   ```
+2. **Start the Native Client**:
+   ```bash
+   cargo run -p eris-client
+   ```
+3. **Access via Browser**:
+   Navigate to `https://localhost:8443` (Secure) or `http://localhost:8080` (Plain).
 
 ## Testing
 

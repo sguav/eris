@@ -11,10 +11,9 @@ Eris is a self-contained hub that functions as both a WebRTC signaling server an
 - **Dual Port Support**: 
     - **Port 8080**: Plain HTTP/WS for native clients bypassing TLS certificate issues.
     - **Port 8443**: Secure HTTPS/WSS for browsers requiring Secure Context.
-- **Message Buffering**: The client Rust backend must buffer incoming protocol messages until the frontend signals it is `ready` to prevent race conditions during initialization.
-- **Connection Resilience**: The native client is configured to support a wide range of modern TLS signature schemes (including ECDSA) and includes logic to bypass certificate validation for local or self-signed environments.
+- **Message Buffering**: The client Rust backend must buffer incoming protocol messages until the frontend signals it is `ready`.
+- **Connection Resilience**: The native client supports modern TLS signature schemes and bypasses validation for local/self-signed environments.
 - **Observability**: All significant events and errors **MUST** be logged to `stdout` with a human-friendly timestamp.
-- **Immediate Persistence**: The client **MUST** save server address, username, and token to `localStorage` immediately upon clicking "Join" to ensure persistence even if the connection fails or the page reloads.
 - **Strict Quality**: Zero warning policy. All workspace tests must pass strictly before any feature commit.
 
 ## Project Overview
@@ -34,6 +33,6 @@ Eris is a self-contained hub that functions as both a WebRTC signaling server an
 
 ## Development Conventions
 
-- **Shared Logic**: Centralized in `crates/eris-core`. New protocol variants must be added there.
-- **Client Logic**: Signaling and connection management are handled in Rust (`crates/client/src/connection.rs`) to ensure robustness.
+- **Shared Logic**: Centralized in `crates/eris-core`.
+- **Client Logic**: Signaling and connection management are handled in Rust (`crates/client/src/connection.rs`).
 - **Frontend**: Thin view layer in `www/`. Uses Tauri `invoke` when available, falling back to standard WebSockets in browsers.
