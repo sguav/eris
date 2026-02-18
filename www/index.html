@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,19 +6,12 @@
   <title>Eris Unified</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
-    :root {
-      --bg: #050505; --card: #121214; --text: #fafafa; --accent: #3b82f6; --error: #ef4444; --success: #22c55e; --dim: #71717a; --sidebar-w: 260px;
-    }
+    :root { --bg: #050505; --card: #121214; --text: #fafafa; --accent: #3b82f6; --error: #ef4444; --success: #22c55e; --dim: #71717a; --sidebar-w: 260px; }
     body { background-color: var(--bg); color: var(--text); margin: 0; font-family: system-ui, -apple-system, sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
     .hidden { display: none !important; }
-    
     #login-screen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1rem; gap: 1rem; }
     .login-box { background: var(--card); padding: 2rem; border-radius: 12px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-    
-    #on-screen-debug {
-        width: 100%; max-width: 600px; height: 150px; background: #000; border: 1px solid #333; color: #0f0; font-family: monospace; font-size: 0.75rem; overflow-y: auto; padding: 0.5rem; margin-top: 1rem; border-radius: 4px;
-    }
-
+    #on-screen-debug { width: 100%; max-width: 600px; height: 150px; background: #000; border: 1px solid #333; color: #0f0; font-family: monospace; font-size: 0.75rem; overflow-y: auto; padding: 0.5rem; margin-top: 1rem; border-radius: 4px; }
     .container { flex: 1; display: flex; flex-direction: row; height: 100%; overflow: hidden; }
     .sidebar { width: var(--sidebar-w); background: var(--card); display: flex; flex-direction: column; gap: 1.5rem; flex-shrink: 0; border-right: 1px solid #18181b; padding: 1rem; transition: transform 0.3s ease; z-index: 50; }
     .main-area { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
@@ -77,7 +69,7 @@
         <button type="submit" id="login-btn" style="padding: 1rem;">Join Server</button>
       </form>
     </div>
-    <div id="on-screen-debug">Waiting for logs...</div>
+    <div id="on-screen-debug">Initializing...</div>
   </div>
 
   <div id="chat-ui" class="container hidden">
@@ -110,6 +102,12 @@
   </div>
 
   <script>
+    // DEFENSIVE ERROR CATCHING
+    window.onerror = function(msg, url, line, col, error) {
+        alert("FATAL JS ERROR: " + msg + "\nAt: " + url + ":" + line);
+        return false;
+    };
+
     const debugEl = document.getElementById('on-screen-debug');
     function screenLog(msg) {
         const line = document.createElement('div');
@@ -118,29 +116,36 @@
         debugEl.scrollTop = debugEl.scrollHeight;
     }
 
+    screenLog("Script loading...");
+
     // TAURI INTEGRATION
     const isTauri = !!window.__TAURI_INTERNALS__ || !!window.__TAURI__;
     screenLog("Environment: " + (isTauri ? "Tauri" : "Browser"));
     
-    const tauriCore = isTauri ? (window.__TAURI__.core || window.__TAURI__.tauri) : { invoke: null };
-    const tauriEvent = isTauri ? window.__TAURI__.event : { listen: null };
+    // Explicitly check window.__TAURI__ structure
+    if (isTauri) {
+        screenLog("Tauri Global found: " + Object.keys(window.__TAURI__).join(','));
+    }
+
+    const tauriCore = isTauri ? (window.__TAURI__.core || window.__TAURI__.tauri || window.__TAURI__) : { invoke: null };
+    const tauriEvent = isTauri ? (window.__TAURI__.event || window.__TAURI__) : { listen: null };
     const { invoke } = tauriCore;
     const { listen } = tauriEvent;
 
-    if (isTauri) {
+    if (isTauri && invoke) {
         const originalLog = console.log;
         const originalError = console.error;
         console.log = (...args) => {
             const msg = args.map(a => String(a)).join(' ');
             originalLog(...args);
-            screenLog("INFO: " + msg);
-            invoke('js_log', { level: 'INFO', message: msg });
+            screenLog("LOG: " + msg);
+            invoke('js_log', { level: 'INFO', message: msg }).catch(e => originalError("Log bridge fail", e));
         };
         console.error = (...args) => {
             const msg = args.map(a => String(a)).join(' ');
             originalError(...args);
-            screenLog("ERROR: " + msg);
-            invoke('js_log', { level: 'ERROR', message: msg });
+            screenLog("ERR: " + msg);
+            invoke('js_log', { level: 'ERROR', message: msg }).catch(e => originalError("Log bridge fail", e));
         };
     }
 
@@ -196,7 +201,7 @@
 
     async function connect() {
       try {
-          console.log("Connect attempt start");
+          screenLog("Connecting to " + myServer);
           if (!myServer) return;
           let protocol = 'wss:';
           let host = myServer;
@@ -209,37 +214,37 @@
           if (!token) { loginError.innerText = "Invite token required"; loginBtn.disabled = false; return; }
           const url = `${protocol}//${host}/ws?token=${token}`;
 
-          if (isTauri) {
-              console.log("Tauri Connect: " + url);
+          if (isTauri && invoke) {
+              screenLog("Invoking Rust connect...");
               try {
                   await invoke('connect_server', { url });
                   statusDot.className = 'status-dot connected';
                   if (myUsername) sendLogin(myUsername);
               } catch (e) {
-                  console.error("Tauri connect error: " + e);
+                  screenLog("Rust Connect Error: " + e);
                   loginError.innerText = "Connection failed: " + e;
                   loginBtn.disabled = false;
               }
           } else {
-              console.log("Browser Connect: " + url);
+              screenLog("Browser WebSocket opening...");
               ws = new WebSocket(url);
               ws.onopen = () => { statusDot.className = 'status-dot connected'; if (myUsername) sendLogin(myUsername); };
-              ws.onclose = (e) => { console.log("WS closed"); statusDot.className = 'status-dot disconnected'; setTimeout(connect, 2000); };
+              ws.onclose = (e) => { statusDot.className = 'status-dot disconnected'; setTimeout(connect, 2000); };
               ws.onmessage = (event) => handleProtocolMsg(JSON.parse(event.data));
-              ws.onerror = (e) => { console.error("WS error"); loginError.innerText = "Connection error"; loginBtn.disabled = false; };
+              ws.onerror = (e) => { screenLog("WS Error"); loginError.innerText = "Connection error"; loginBtn.disabled = false; };
           }
-      } catch (err) { console.error("Fatal connect error: " + err); loginBtn.disabled = false; }
+      } catch (err) { screenLog("Connect fatal: " + err); loginBtn.disabled = false; }
     }
 
-    if (isTauri) {
+    if (isTauri && listen) {
         listen('protocol-msg', (event) => handleProtocolMsg(event.payload)).then(() => {
-            console.log("Listeners active, calling ready");
+            screenLog("Listeners ready");
             invoke('client_ready');
         });
     }
 
     async function handleProtocolMsg(msg) {
-        console.log("Protocol Msg: " + msg.type);
+        console.log("Protocol: " + msg.type);
         switch (msg.type) {
             case 'Identify':
                 myId = msg.payload.id;
@@ -264,7 +269,7 @@
     }
 
     async function sendCommand(msg) {
-        if (isTauri) { await invoke('send_protocol', { msg }); }
+        if (isTauri && invoke) { await invoke('send_protocol', { msg }); }
         else if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify(msg)); }
     }
 
@@ -297,7 +302,7 @@
             localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
             inVoice = true; btnVoice.classList.add('active'); btnVoice.innerHTML = '<i class="fas fa-phone-slash"></i> Leave Voice';
             peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => createPeerConnection(peer.id, true));
-        } catch (err) { console.error("Mic denied: " + err); }
+        } catch (err) { screenLog("Mic Error: " + err); }
     }
     function stopVoice() { inVoice = false; btnVoice.classList.remove('active'); btnVoice.innerHTML = '<i class="fas fa-phone"></i> Join Voice'; if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; } cleanupDeadConnections(); }
     async function toggleScreen() { if (inScreen) stopScreen(); else await startScreen(); }
@@ -308,7 +313,7 @@
             addVideoElement('me', screenStream, 'You (Sharing)'); sendCommand({ type: 'ScreenState', payload: { is_sharing: true, peer_id: myId } });
             screenStream.getVideoTracks()[0].onended = () => stopScreen();
             peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => createPeerConnection(peer.id, true));
-        } catch (err) { console.error("Screen error: " + err); }
+        } catch (err) { screenLog("Screen Error: " + err); }
     }
     function stopScreen() { inScreen = false; btnScreen.classList.remove('active'); btnScreen.innerHTML = '<i class="fas fa-desktop"></i> Share Screen'; if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; } removeVideoElement('me'); if (videoGrid.children.length === 0) videoGrid.classList.add('hidden'); sendCommand({ type: 'ScreenState', payload: { is_sharing: false, peer_id: myId } }); cleanupDeadConnections(); }
     function cleanupDeadConnections() { if (!inVoice && !inScreen && watchingPeers.size === 0) { Object.keys(peerConnections).forEach(id => { peerConnections[id].close(); delete peerConnections[id]; }); } }
@@ -351,7 +356,7 @@
       const user = usernameInput.value.trim();
       const server = serverInput.value.trim();
       const token = tokenInput.value.trim();
-      console.log("JOIN CLICKED: " + user + " @ " + server);
+      screenLog("Join Click: " + user + " @ " + server);
       if (!user || !server || !token) { loginError.innerText = "All fields required"; return; }
       myUsername = user; myServer = server; myToken = token; loginError.innerText = ''; loginBtn.disabled = true;
       connect();
@@ -368,6 +373,7 @@
     const logout = () => { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(SERVER_KEY); localStorage.removeItem(TOKEN_KEY); window.location.reload(); };
     btnLogout.onclick = logout; btnLogoutMobile.onclick = logout; btnVoice.onclick = toggleVoice; btnScreen.onclick = toggleScreen;
     if (myUsername && myServer && myToken) connect();
+    screenLog("Init complete");
   </script>
 </body>
 </html>
