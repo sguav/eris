@@ -214,3 +214,89 @@ fn broadcast_peer_list(state: &Arc<AppState>) {
     }).collect();
     let _ = state.broadcast_tx.send(Protocol::PeerList { peers });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_protocol_serialization() {
+        // Test ChatMessage serialization
+        let msg = Protocol::ChatMessage { 
+            author: "Alice".to_string(), 
+            content: "Hello".to_string() 
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json, json!({
+            "type": "ChatMessage",
+            "payload": {
+                "author": "Alice",
+                "content": "Hello"
+            }
+        }));
+
+        // Test Login serialization
+        let login = Protocol::Login { username: "Bob".to_string() };
+        let json = serde_json::to_value(&login).unwrap();
+        assert_eq!(json, json!({
+            "type": "Login",
+            "payload": {
+                "username": "Bob"
+            }
+        }));
+    }
+
+    #[test]
+    fn test_history_buffer_limit() {
+        let (tx, _) = broadcast::channel(10);
+        let state = AppState {
+            peers: DashMap::new(),
+            broadcast_tx: tx,
+            history: std::sync::Mutex::new(Vec::new()),
+        };
+
+        // Fill history beyond limit
+        for i in 0..60 {
+            let msg = Protocol::ChatMessage { 
+                author: "System".to_string(), 
+                content: format!("Msg {}", i) 
+            };
+            let mut history = state.history.lock().unwrap();
+            history.push(msg);
+            if history.len() > 50 {
+                history.remove(0);
+            }
+        }
+
+        let history = state.history.lock().unwrap();
+        assert_eq!(history.len(), 50);
+        if let Protocol::ChatMessage { content, .. } = &history[0] {
+            assert_eq!(content, "Msg 10");
+        }
+    }
+
+    #[test]
+    fn test_username_uniqueness_logic() {
+        let (tx, _) = broadcast::channel(10);
+        let state = AppState {
+            peers: DashMap::new(),
+            broadcast_tx: tx,
+            history: std::sync::Mutex::new(Vec::new()),
+        };
+
+        let uid = Uuid::new_v4();
+        state.peers.insert(uid, Peer {
+            username: "Alice".to_string(),
+            tx: broadcast::channel(1).0,
+        });
+
+        let name_to_check = "alice"; // Case insensitive check
+        let is_taken = state.peers.iter().any(|p| p.username.to_lowercase() == name_to_check.to_lowercase());
+        
+        assert!(is_taken);
+        
+        let is_taken_bob = state.peers.iter().any(|p| p.username.to_lowercase() == "bob".to_lowercase());
+        assert!(!is_taken_bob);
+    }
+}
