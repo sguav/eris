@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -383,7 +384,6 @@
                 handleSignal(msg.payload.target_id, msg.payload.data);
                 break;
             case 'RequestStream':
-                // Send screen stream if sharing
                 if (inScreen) createPeerConnection(msg.payload.target_id, true);
                 break;
             case 'System':
@@ -476,10 +476,13 @@
 
     async function startScreen() {
         try {
-            // Optimization for high quality screen sharing with audio
             screenStream = await navigator.mediaDevices.getDisplayMedia({ 
-                video: { cursor: "always", displaySurface: "monitor" }, 
-                audio: { echoCancellation: true, noiseSuppression: true } 
+                video: true, 
+                audio: {
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false
+                } 
             });
             inScreen = true;
             btnScreen.classList.add('active');
@@ -490,6 +493,11 @@
             ws.send(JSON.stringify({ type: 'ScreenState', payload: { is_sharing: true, peer_id: myId } }));
 
             screenStream.getVideoTracks()[0].onended = () => stopScreen();
+
+            // Notify everyone we are sharing now
+            peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => {
+                createPeerConnection(peer.id, true);
+            });
         } catch (err) {
             console.error(err);
         }
@@ -517,15 +525,20 @@
 
     function createPeerConnection(targetId, isOfferor) {
         if (peerConnections[targetId]) {
-            // Add new tracks if they don't exist yet
-            const currentSenders = peerConnections[targetId].getSenders();
+            const pc = peerConnections[targetId];
+            const currentSenders = pc.getSenders();
+            
             if (localStream) localStream.getTracks().forEach(t => {
-                if (!currentSenders.find(s => s.track === t)) peerConnections[targetId].addTrack(t, localStream);
+                if (!currentSenders.find(s => s.track === t)) pc.addTrack(t, localStream);
             });
             if (screenStream) screenStream.getTracks().forEach(t => {
-                if (!currentSenders.find(s => s.track === t)) peerConnections[targetId].addTrack(t, screenStream);
+                if (!currentSenders.find(s => s.track === t)) pc.addTrack(t, screenStream);
             });
-            return peerConnections[targetId];
+
+            if (isOfferor) {
+                pc.createOffer().then(o => pc.setLocalDescription(o)).then(() => sendSignal(targetId, { sdp: pc.localDescription }));
+            }
+            return pc;
         }
         
         const pc = new RTCPeerConnection(rtcConfig);
@@ -543,14 +556,13 @@
                 const peer = peers.find(p => p.id === targetId);
                 addVideoElement(targetId, stream, peer ? peer.username : 'Peer');
             } else {
-                // IMPORTANT: Ensure audio tracks are attached to an element to play
+                // Ensure every unique incoming audio track gets its own player
                 const audio = document.createElement('audio');
                 audio.autoplay = true;
-                audio.srcObject = stream;
-                // Add to body hidden so it's part of DOM context (helps with mobile/autoplay)
+                audio.srcObject = new MediaStream([e.track]);
                 audio.style.display = 'none';
                 document.body.appendChild(audio);
-                audio.onended = () => audio.remove();
+                e.track.onended = () => audio.remove();
             }
         };
 
