@@ -130,6 +130,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: Socket
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(Message::Text(text))) = receiver.next().await {
             if let Ok(protocol_msg) = serde_json::from_str::<Protocol>(&text) {
+                log("SERVER", &format!("Received from '{}': {:?}", my_username_clone, protocol_msg));
                 match protocol_msg {
                     Protocol::JoinChannel { channel } => {
                         log("SERVER", &format!("Peer '{}' moving to channel: {}", my_username_clone, channel));

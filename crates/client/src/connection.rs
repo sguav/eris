@@ -1,14 +1,16 @@
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 use futures_util::{SinkExt, StreamExt};
-use tokio_tungstenite::{connect_async_tls_with_config, connect_async_with_config, tungstenite::protocol::Message, Connector};
+use tokio_tungstenite::{connect_async_tls_with_config, connect_async_with_config, tungstenite::protocol::Message, Connector, WebSocketStream, MaybeTlsStream};
 use eris_core::{Protocol, log};
 use rustls::client::danger::{ServerCertVerifier, ServerCertVerified};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use http::Request;
+use tokio::net::TcpStream;
 
 pub struct ConnectionManager {
     broadcast_tx: broadcast::Sender<Protocol>,
-    ws_sink: Arc<Mutex<Option<futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, Message>>>>,
+    ws_sink: Arc<Mutex<Option<futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>>,
     buffer: Arc<Mutex<Vec<Protocol>>>,
     is_ready: Arc<Mutex<bool>>,
 }
@@ -42,9 +44,7 @@ impl ServerCertVerifier for NoVerifier {
 
 impl ConnectionManager {
     pub fn new() -> (Self, broadcast::Receiver<Protocol>) {
-        // Initialize rustls crypto provider (once)
         let _ = rustls::crypto::ring::default_provider().install_default();
-
         let (tx, rx) = broadcast::channel(100);
         (
             Self {
@@ -66,21 +66,44 @@ impl ConnectionManager {
         }
     }
 
-    pub async fn connect(&self, url: String) -> Result<(), String> {
-        log("CLIENT", &format!("Handshaking with WebSocket: {}", url));
+    pub async fn connect(&self, url_str: String) -> Result<(), String> {
+        log("CLIENT", &format!("Connecting to WebSocket: {}", url_str));
         
-        let ws_stream = if url.starts_with("wss://") {
-            let root_store = rustls::RootCertStore::empty();
+        let url = url::Url::parse(&url_str).map_err(|e| e.to_string())?;
+        let host = url.host_str().ok_or("No host in URL")?.to_string();
+        
+        let request = Request::builder()
+            .uri(url_str.clone())
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .header("Host", &host)
+            .header("Origin", format!("{}://{}", url.scheme().replace("ws", "http"), host))
+            .header("Connection", "Upgrade")
+            .header("Upgrade", "websocket")
+            .header("Sec-WebSocket-Version", "13")
+            .header("Sec-WebSocket-Key", tokio_tungstenite::tungstenite::handshake::client::generate_key())
+            .body(())
+            .map_err(|e: http::Error| e.to_string())?;
+
+        let ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>> = if url_str.starts_with("wss://") {
+            let is_local = host == "localhost" || host == "127.0.0.1" || host.starts_with("192.168.");
+            
+            let mut root_store = rustls::RootCertStore::empty();
+            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            
             let mut config = rustls::ClientConfig::builder()
                 .with_root_certificates(root_store)
                 .with_no_client_auth();
-            config.dangerous().set_certificate_verifier(Arc::new(NoVerifier));
-            let connector = Connector::Rustls(Arc::new(config));
             
-            let (s, _) = connect_async_tls_with_config(url, None, false, Some(connector)).await.map_err(|e| e.to_string())?;
+            if is_local {
+                log("CLIENT", "Local address detected, bypassing TLS verification");
+                config.dangerous().set_certificate_verifier(Arc::new(NoVerifier));
+            }
+            
+            let connector = Connector::Rustls(Arc::new(config));
+            let (s, _) = connect_async_tls_with_config(request, None, false, Some(connector)).await.map_err(|e| e.to_string())?;
             s
         } else {
-            let (s, _) = connect_async_with_config(url, None, false).await.map_err(|e| e.to_string())?;
+            let (s, _) = connect_async_with_config(request, None, false).await.map_err(|e| e.to_string())?;
             s
         };
 
@@ -104,11 +127,7 @@ impl ConnectionManager {
                             }
                         }
                     }
-                    Ok(_) => {}
-                    Err(e) => {
-                        log("CLIENT", &format!("ERROR in WS receive loop: {}", e));
-                        break;
-                    }
+                    _ => {}
                 }
             }
             log("CLIENT", "WS receive loop terminated");

@@ -14,6 +14,7 @@ Eris is a self-contained hub that functions as both a WebRTC signaling server an
 - **Message Buffering**: The client Rust backend must buffer incoming protocol messages until the frontend signals it is `ready` to prevent race conditions during initialization.
 - **Connection Resilience**: The native client is configured to support a wide range of modern TLS signature schemes (including ECDSA) and includes logic to bypass certificate validation for local or self-signed environments.
 - **Observability**: All significant events and errors **MUST** be logged to `stdout` with a human-friendly timestamp.
+- **Immediate Persistence**: The client **MUST** save server address, username, and token to `localStorage` immediately upon clicking "Join" to ensure persistence even if the connection fails or the page reloads.
 - **Strict Quality**: Zero warning policy. All workspace tests must pass strictly before any feature commit.
 
 ## Project Overview
