@@ -360,8 +360,8 @@
           protocol = 'ws:';
           host = host.replace('http://', '');
       } else {
-          // Default logic: use wss unless it's a known non-tls port or localhost on non-tls
-          if (window.location.protocol === 'http:' && !host.includes('8443')) {
+          // Default logic: use ws if port is 8080, otherwise wss
+          if (host.includes('8080')) {
               protocol = 'ws:';
           }
       }
