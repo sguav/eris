@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eris Unified</title>
+  <style>
+    :root {
+      --bg: #050505;
+      --card: #121214;
+      --text: #fafafa;
+      --accent: #3b82f6;
+      --error: #ef4444;
+      --success: #22c55e;
+      --dim: #71717a;
+    }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .hidden { display: none !important; }
+    
+    /* Login Screen */
+    #login-screen {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .login-box {
+      background: var(--card);
+      padding: 2rem;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
+    
+    /* Main UI */
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      flex-direction: row;
+      height: 100%;
+      padding: 1rem;
+      gap: 1rem;
+      box-sizing: border-box;
+    }
+    .main-area {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+    }
+    .sidebar {
+        width: 250px;
+        background: var(--card);
+        border-radius: 8px;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+    header {
+      background: var(--card);
+      padding: 1rem;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 5px;
+    }
+    .connected { background: var(--success); }
+    .disconnected { background: var(--error); }
+    
+    #messages {
+      flex: 1;
+      background: rgba(255,255,255,0.03);
+      border-radius: 8px;
+      padding: 1rem;
+      overflow-y: auto;
+      margin-bottom: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .msg {
+      padding: 0.5rem 0.8rem;
+      border-radius: 4px;
+      background: var(--card);
+      word-break: break-all;
+    }
+    .msg-system {
+      background: transparent;
+      color: var(--dim);
+      font-style: italic;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+    .msg-error {
+      color: var(--error);
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+    .msg-author {
+      color: var(--accent);
+      font-weight: bold;
+      margin-right: 5px;
+    }
+
+    form {
+      display: flex;
+      gap: 0.5rem;
+    }
+    input {
+      flex: 1;
+      background: var(--card);
+      border: 1px solid #27272a;
+      color: white;
+      padding: 0.8rem;
+      border-radius: 4px;
+      outline: none;
+    }
+    input:focus { border-color: var(--accent); }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 0.8rem 1.5rem;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover { opacity: 0.9; }
+    button:disabled { background: var(--dim); cursor: not-allowed; }
+
+    /* Voice UI */
+    .peer-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    .peer-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem;
+        border-radius: 4px;
+    }
+    .peer-item:hover { background: rgba(255,255,255,0.05); }
+    .voice-active { color: var(--success); }
+    
+    #voice-controls {
+        margin-top: auto;
+        padding-top: 1rem;
+        border-top: 1px solid #27272a;
+    }
+    .btn-voice { background: #18181b; border: 1px solid #27272a; width: 100%; }
+    .btn-voice.active { background: var(--success); border-color: var(--success); }
+  </style>
+</head>
+<body>
+  <div id="login-screen">
+    <div class="login-box">
+      <h1 style="margin-top:0">🌑 ERIS</h1>
+      <p style="color: var(--dim)">Enter a username to join</p>
+      <form id="login-form" style="flex-direction: column;">
+        <input type="text" id="username-input" placeholder="Username" required autofocus autocomplete="off">
+        <div id="login-error" style="color: var(--error); font-size: 0.8rem; margin-top: 0.5rem; height: 1rem;"></div>
+        <button type="submit" id="login-btn">Join Server</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="chat-ui" class="container hidden">
+    <div class="sidebar">
+        <h2 style="font-size: 1rem; margin: 0;">Online Peers</h2>
+        <ul id="peer-list" class="peer-list"></ul>
+        
+        <div id="voice-controls">
+            <button id="btn-voice" class="btn-voice">
+                Join Voice
+            </button>
+        </div>
+    </div>
+
+    <div class="main-area">
+        <header>
+          <h1 style="margin:0; font-size: 1.2rem;">🌑 ERIS UNIFIED</h1>
+          <div>
+            <span id="status-dot" class="status-dot disconnected"></span>
+            <span id="status-text" style="color: var(--dim); font-size: 0.9rem;">Connecting...</span>
+          </div>
+        </header>
+
+        <div id="messages"></div>
+
+        <form id="chat-form">
+          <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+          <button type="submit">Send</button>
+        </form>
+    </div>
+  </div>
+
+  <script>
+    const loginScreen = document.getElementById('login-screen');
+    const chatUI = document.getElementById('chat-ui');
+    const loginForm = document.getElementById('login-form');
+    const usernameInput = document.getElementById('username-input');
+    const loginError = document.getElementById('login-error');
+    const loginBtn = document.getElementById('login-btn');
+    
+    const msgContainer = document.getElementById('messages');
+    const chatForm = document.getElementById('chat-form');
+    const chatInput = document.getElementById('chat-input');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    const peerListEl = document.getElementById('peer-list');
+    const btnVoice = document.getElementById('btn-voice');
+
+    let ws;
+    let myUsername = '';
+    let myId = '';
+    let peers = [];
+    
+    // WebRTC state
+    let localStream = null;
+    let peerConnections = {}; // target_id -> RTCPeerConnection
+    let inVoice = false;
+
+    const rtcConfig = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    };
+
+    function connect() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+      ws.onopen = () => {
+        statusDot.className = 'status-dot connected';
+        statusText.innerText = 'Connected';
+        if (myUsername) sendLogin(myUsername);
+      };
+
+      ws.onclose = () => {
+        statusDot.className = 'status-dot disconnected';
+        statusText.innerText = 'Disconnected';
+        setTimeout(connect, 2000);
+      };
+
+      ws.onmessage = async (event) => {
+        const msg = JSON.parse(event.data);
+        
+        switch (msg.type) {
+            case 'Identify':
+                myId = msg.payload.id;
+                loginScreen.classList.add('hidden');
+                chatUI.classList.remove('hidden');
+                addMessage({ type: 'System', payload: { message: `Welcome, ${msg.payload.username}!`, severity: 'info' }});
+                break;
+            case 'PeerList':
+                peers = msg.payload.peers;
+                renderPeers();
+                break;
+            case 'ChatMessage':
+                addMessage(msg);
+                break;
+            case 'Signal':
+                handleSignal(msg.payload.target_id, msg.payload.data);
+                break;
+            case 'System':
+                if (msg.payload.severity === 'error' && !myId) {
+                    loginError.innerText = msg.payload.message;
+                    loginBtn.disabled = false;
+                } else {
+                    addMessage(msg);
+                }
+                break;
+        }
+      };
+    }
+
+    function renderPeers() {
+        peerListEl.innerHTML = peers
+            .filter(p => p.id !== myId)
+            .map(p => `
+                <li class="peer-item" id="peer-${p.id}">
+                    <span class="status-dot connected"></span>
+                    <span>${p.username}</span>
+                </li>
+            `).join('');
+    }
+
+    async function toggleVoice() {
+        if (inVoice) {
+            stopVoice();
+        } else {
+            await startVoice();
+        }
+    }
+
+    async function startVoice() {
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            inVoice = true;
+            btnVoice.classList.add('active');
+            btnVoice.innerText = 'Leave Voice';
+            
+            // Notify others by sending an offer to everyone
+            peers.filter(p => p.id !== myId).forEach(peer => {
+                createPeerConnection(peer.id, true);
+            });
+        } catch (err) {
+            console.error("Mic access denied", err);
+            addMessage({ type: 'System', payload: { message: "Microphone access denied", severity: 'error' }});
+        }
+    }
+
+    function stopVoice() {
+        inVoice = false;
+        btnVoice.classList.remove('active');
+        btnVoice.innerText = 'Join Voice';
+        
+        if (localStream) {
+            localStream.getTracks().forEach(track => track.stop());
+            localStream = null;
+        }
+        
+        Object.keys(peerConnections).forEach(id => {
+            peerConnections[id].close();
+            delete peerConnections[id];
+        });
+    }
+
+    function createPeerConnection(targetId, isOfferor) {
+        if (peerConnections[targetId]) return peerConnections[targetId];
+
+        const pc = new RTCPeerConnection(rtcConfig);
+        peerConnections[targetId] = pc;
+
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                sendSignal(targetId, { ice: event.candidate });
+            }
+        };
+
+        pc.ontrack = (event) => {
+            const remoteAudio = new Audio();
+            remoteAudio.srcObject = event.streams[0];
+            remoteAudio.play();
+            addMessage({ type: 'System', payload: { message: "Voice connected with a peer", severity: 'info' }});
+        };
+
+        if (isOfferor) {
+            pc.createOffer().then(offer => {
+                return pc.setLocalDescription(offer);
+            }).then(() => {
+                sendSignal(targetId, { sdp: pc.localDescription });
+            });
+        }
+
+        return pc;
+    }
+
+    async function handleSignal(fromId, data) {
+        if (!inVoice) return; // Ignore signals if not in voice
+
+        let pc = peerConnections[fromId];
+        
+        if (data.sdp) {
+            if (!pc) pc = createPeerConnection(fromId, false);
+            
+            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            if (data.sdp.type === 'offer') {
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                sendSignal(fromId, { sdp: pc.localDescription });
+            }
+        } else if (data.ice) {
+            if (pc) await pc.addIceCandidate(new RTCIceCandidate(data.ice));
+        }
+    }
+
+    function sendSignal(targetId, data) {
+        ws.send(JSON.stringify({
+            type: 'Signal',
+            payload: { target_id: targetId, data }
+        }));
+    }
+
+    function sendLogin(username) {
+        ws.send(JSON.stringify({ type: 'Login', payload: { username } }));
+    }
+
+    function addMessage(msg) {
+      const div = document.createElement('div');
+      if (msg.type === 'ChatMessage') {
+        div.className = 'msg';
+        const isMe = msg.payload.author === myUsername;
+        div.innerHTML = `<span class="msg-author" style="${isMe ? 'color: #10b981' : ''}">${msg.payload.author}:</span> ${msg.payload.content}`;
+      } else if (msg.type === 'System') {
+        div.className = `msg msg-system ${msg.payload.severity === 'error' ? 'msg-error' : ''}`;
+        div.innerText = msg.payload.message;
+      }
+      msgContainer.appendChild(div);
+      msgContainer.scrollTop = msgContainer.scrollHeight;
+    }
+
+    loginForm.onsubmit = (e) => {
+      e.preventDefault();
+      const user = usernameInput.value.trim();
+      if (!user) return;
+      myUsername = user;
+      loginError.innerText = '';
+      loginBtn.disabled = true;
+      if (ws.readyState === WebSocket.OPEN) sendLogin(user);
+    };
+
+    chatForm.onsubmit = (e) => {
+      e.preventDefault();
+      const content = chatInput.value.trim();
+      if (!content || !ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: 'ChatMessage', payload: { author: myUsername, content } }));
+      chatInput.value = '';
+    };
+
+    btnVoice.onclick = toggleVoice;
+
+    connect();
+  </script>
+</body>
+</html>

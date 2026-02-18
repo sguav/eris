@@ -1,0 +1,13 @@
+# Rust artifacts
+/target
+Cargo.lock
+
+# IDE and System files
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Environment files
+.env
