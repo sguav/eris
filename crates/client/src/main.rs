@@ -13,6 +13,11 @@ struct AppState {
 }
 
 #[tauri::command]
+fn js_log(level: String, message: String) {
+    log(&format!("JS-{}", level), &message);
+}
+
+#[tauri::command]
 async fn connect_server(
     url: String,
     state: State<'_, Arc<AppState>>,
@@ -64,7 +69,7 @@ fn create_app() -> tauri::App {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![connect_server, send_protocol, client_ready])
+        .invoke_handler(tauri::generate_handler![connect_server, send_protocol, client_ready, js_log])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
 }
@@ -92,7 +97,7 @@ mod tests {
         
         let app = mock_builder()
             .manage(app_state.clone())
-            .invoke_handler(tauri::generate_handler![connect_server, send_protocol, client_ready])
+            .invoke_handler(tauri::generate_handler![connect_server, send_protocol, client_ready, js_log])
             .build(mock_context(noop_assets()))
             .unwrap();
 

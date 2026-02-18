@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -233,6 +232,7 @@
       <p style="color: var(--dim); margin-bottom: 2rem;">Secure Standalone Hub</p>
       <form id="login-form" style="flex-direction: column; gap: 0.8rem;">
         <input type="text" id="server-input" placeholder="Server (e.g. 192.168.1.50:8443)" autocomplete="off">
+        <input type="text" id="token-input" placeholder="Invite Token" autocomplete="off">
         <input type="text" id="username-input" placeholder="Username" required autofocus autocomplete="off">
         <div id="login-error" style="color: var(--error); font-size: 0.8rem; height: 1rem;"></div>
         <button type="submit" id="login-btn" style="padding: 1rem;">Join Server</button>
@@ -292,17 +292,30 @@
   <script>
     // TAURI INTEGRATION
     const isTauri = !!window.__TAURI_INTERNALS__ || !!window.__TAURI__;
-    console.log("Environment: ", isTauri ? "Tauri" : "Browser");
-    
-    // Polyfill for non-tauri contexts
     const tauriCore = isTauri ? (window.__TAURI__.core || window.__TAURI__.tauri) : { invoke: null };
     const tauriEvent = isTauri ? window.__TAURI__.event : { listen: null };
-    
     const { invoke } = tauriCore;
     const { listen } = tauriEvent;
 
+    // REDIRECT LOGS TO RUST IN TAURI
+    if (isTauri) {
+        const originalLog = console.log;
+        const originalError = console.error;
+        console.log = (...args) => {
+            originalLog(...args);
+            invoke('js_log', { level: 'INFO', message: args.map(a => String(a)).join(' ') });
+        };
+        console.error = (...args) => {
+            originalError(...args);
+            invoke('js_log', { level: 'ERROR', message: args.map(a => String(a)).join(' ') });
+        };
+    }
+
+    console.log("Environment Detection: ", isTauri ? "Tauri" : "Browser");
+
     const STORAGE_KEY = 'eris_username';
     const SERVER_KEY = 'eris_server';
+    const TOKEN_KEY = 'eris_token';
     
     const loginScreen = document.getElementById('login-screen');
     const chatUI = document.getElementById('chat-ui');
@@ -311,6 +324,7 @@
     const menuToggle = document.getElementById('menu-toggle');
     const loginForm = document.getElementById('login-form');
     const serverInput = document.getElementById('server-input');
+    const tokenInput = document.getElementById('token-input');
     const usernameInput = document.getElementById('username-input');
     const loginError = document.getElementById('login-error');
     const loginBtn = document.getElementById('login-btn');
@@ -331,6 +345,7 @@
     let ws;
     let myUsername = localStorage.getItem(STORAGE_KEY) || '';
     let myServer = localStorage.getItem(SERVER_KEY) || (isTauri ? '' : window.location.host);
+    let myToken = localStorage.getItem(TOKEN_KEY) || '';
     let myId = '';
     let currentChannel = 'lobby';
     let peers = [];
@@ -346,16 +361,16 @@
 
     serverInput.value = myServer;
     usernameInput.value = myUsername;
+    tokenInput.value = myToken;
 
     menuToggle.onclick = () => { sidebar.classList.add('open'); sidebarOverlay.classList.add('open'); };
     sidebarOverlay.onclick = () => { sidebar.classList.remove('open'); sidebarOverlay.classList.remove('open'); };
 
     async function connect() {
       try {
-          console.log("Connect triggered. Server:", myServer, "Username:", myUsername);
+          console.log("Attempting connect. Server:", myServer, "User:", myUsername);
           if (!myServer) return;
 
-          console.log("Secure Context:", window.isSecureContext);
           let protocol = 'wss:';
           let host = myServer;
 
@@ -370,60 +385,68 @@
           }
           
           const urlParams = new URLSearchParams(window.location.search);
-          const token = urlParams.get('token') || (isTauri ? localStorage.getItem('eris_token') : null) || prompt("Enter token:");
-          if (token) localStorage.setItem('eris_token', token);
+          const token = urlParams.get('token') || myToken;
+          
+          if (!token) {
+              loginError.innerText = "Invite token required";
+              loginBtn.disabled = false;
+              return;
+          }
 
           const url = `${protocol}//${host}/ws?token=${token}`;
 
           if (isTauri) {
-              console.log("Rust: Connecting to", url);
+              console.log("Tauri: invoking connect_server with", url);
               try {
                   await invoke('connect_server', { url });
                   statusDot.className = 'status-dot connected';
                   if (myUsername) sendLogin(myUsername);
               } catch (e) {
-                  console.error("Tauri Connection Error:", e);
+                  console.error("Tauri connect error:", e);
                   loginError.innerText = "Connection failed: " + e;
                   loginBtn.disabled = false;
               }
           } else {
-              console.log("Browser: Connecting to", url);
+              console.log("Browser: opening WebSocket to", url);
               ws = new WebSocket(url);
               ws.onopen = () => {
                 statusDot.className = 'status-dot connected';
                 if (myUsername) sendLogin(myUsername);
               };
-              ws.onclose = () => {
+              ws.onclose = (e) => {
+                console.log("WebSocket closed:", e.code, e.reason);
                 statusDot.className = 'status-dot disconnected';
                 setTimeout(connect, 2000);
               };
               ws.onmessage = (event) => handleProtocolMsg(JSON.parse(event.data));
               ws.onerror = (e) => {
-                  console.error("WebSocket Error:", e);
-                  loginError.innerText = "WebSocket Error. Check console.";
+                  console.error("WebSocket error observed");
+                  loginError.innerText = "Connection error. Check console.";
                   loginBtn.disabled = false;
               };
           }
       } catch (err) {
-          console.error("Fatal Connect Error:", err);
+          console.error("Connect setup failed:", err);
           loginBtn.disabled = false;
       }
     }
 
     if (isTauri) {
         listen('protocol-msg', (event) => handleProtocolMsg(event.payload)).then(() => {
+            console.log("JS: Listeners setup, calling client_ready");
             invoke('client_ready');
         });
     }
 
     async function handleProtocolMsg(msg) {
-        console.log("JS: Received Protocol Msg:", msg);
+        console.log("Protocol Msg Received:", msg.type);
         switch (msg.type) {
             case 'Identify':
                 myId = msg.payload.id;
                 myUsername = msg.payload.username;
                 localStorage.setItem(STORAGE_KEY, myUsername);
                 localStorage.setItem(SERVER_KEY, myServer);
+                localStorage.setItem(TOKEN_KEY, myToken);
                 myNameDisplay.innerText = myUsername;
                 loginScreen.classList.add('hidden');
                 chatUI.classList.remove('hidden');
@@ -528,6 +551,7 @@
             btnVoice.innerHTML = '<i class="fas fa-phone-slash"></i> Leave Voice';
             peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => createPeerConnection(peer.id, true));
         } catch (err) {
+            console.error("Mic access denied:", err);
             addMessage({ type: 'System', payload: { message: "Mic access denied", severity: 'error' }});
         }
     }
@@ -561,7 +585,7 @@
             screenStream.getVideoTracks()[0].onended = () => stopScreen();
             peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => createPeerConnection(peer.id, true));
         } catch (err) {
-            console.error(err);
+            console.error("Screen share error:", err);
         }
     }
 
@@ -684,16 +708,18 @@
 
     loginForm.onsubmit = (e) => {
       e.preventDefault();
-      console.log("Form submitted");
       const user = usernameInput.value.trim();
       const server = serverInput.value.trim();
-      if (!user || !server) {
+      const token = tokenInput.value.trim();
+      
+      if (!user || !server || !token) {
           loginError.innerText = "All fields required";
           return;
       }
       
       myUsername = user;
       myServer = server;
+      myToken = token;
       loginError.innerText = '';
       loginBtn.disabled = true;
       connect();
@@ -707,12 +733,17 @@
       chatInput.value = '';
     };
 
-    const logout = () => { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem('eris_token'); window.location.reload(); };
+    const logout = () => { 
+        localStorage.removeItem(STORAGE_KEY); 
+        localStorage.removeItem(SERVER_KEY);
+        localStorage.removeItem(TOKEN_KEY);
+        window.location.reload(); 
+    };
     btnLogout.onclick = logout;
     btnLogoutMobile.onclick = logout;
     btnVoice.onclick = toggleVoice;
     btnScreen.onclick = toggleScreen;
-    if (myUsername && myServer) connect();
+    if (myUsername && myServer && myToken) connect();
   </script>
 </body>
 </html>
