@@ -1,6 +1,8 @@
 //! ERIS UNIFIED CORE
 //! Purpose: Server Signaling + UI Web Server
 
+mod protocol;
+
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::State,
@@ -10,28 +12,11 @@ use axum::{
 };
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use protocol::{PeerInfo, Protocol};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
 use uuid::Uuid;
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(tag = "type", content = "payload")]
-enum Protocol {
-    Login { username: String },
-    Identify { id: Uuid, username: String },
-    PeerList { peers: Vec<PeerInfo> },
-    ChatMessage { author: String, content: String },
-    Signal { target_id: Uuid, data: serde_json::Value },
-    System { message: String, severity: String },
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-struct PeerInfo {
-    id: Uuid,
-    username: String,
-}
 
 struct Peer {
     username: String,
@@ -219,33 +204,6 @@ fn broadcast_peer_list(state: &Arc<AppState>) {
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn test_protocol_serialization() {
-        // Test ChatMessage serialization
-        let msg = Protocol::ChatMessage { 
-            author: "Alice".to_string(), 
-            content: "Hello".to_string() 
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json, json!({
-            "type": "ChatMessage",
-            "payload": {
-                "author": "Alice",
-                "content": "Hello"
-            }
-        }));
-
-        // Test Login serialization
-        let login = Protocol::Login { username: "Bob".to_string() };
-        let json = serde_json::to_value(&login).unwrap();
-        assert_eq!(json, json!({
-            "type": "Login",
-            "payload": {
-                "username": "Bob"
-            }
-        }));
-    }
 
     #[test]
     fn test_history_buffer_limit() {
