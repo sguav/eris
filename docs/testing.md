@@ -44,7 +44,12 @@ Until full integration coverage is restored for HTTPS, use the following steps f
     - Click "Join Voice" in both tabs.
     - Accept microphone permissions.
     - Verify peer-to-peer audio connectivity (use headphones to avoid feedback).
-4. **Persistence Test**:
+4. **Screen Sharing Test**:
+    - Click "Share Screen" in one tab.
+    - Select a window or screen to share in the browser dialog.
+    - Verify that a video grid appears in *both* tabs and displays the stream.
+    - Click "Stop Sharing" and verify the video grid disappears.
+5. **Persistence Test**:
     - Refresh one tab; it should automatically log back in and show chat history.
 5. **Logout Test**:
     - Click "Logout" and verify the `localStorage` is cleared and the login screen returns.
