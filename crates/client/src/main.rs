@@ -46,7 +46,7 @@ async fn client_ready(
     Ok(())
 }
 
-fn main() {
+fn create_app() -> tauri::App {
     let (connection, mut rx) = ConnectionManager::new();
     let app_state = Arc::new(AppState { connection });
     let state_clone = app_state.clone();
@@ -54,9 +54,7 @@ fn main() {
     tauri::Builder::default()
         .manage(state_clone)
         .setup(move |app| {
-            // For Linux WebKitGTK - help with some sandboxing issues if any
             std::env::set_var("WEBKIT_FORCE_SANDBOX", "0");
-            
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 while let Ok(msg) = rx.recv().await {
@@ -66,14 +64,45 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![connect_server, send_protocol, client_ready])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+}
+
+fn main() {
+    create_app().run(|_app_handle, _event| {});
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use tauri::Manager;
+    use tauri::test::{mock_builder, mock_context, noop_assets};
+
     #[test]
     fn test_tauri_context() {
         let _context: tauri::Context<tauri::Wry> = tauri::generate_context!();
+    }
+
+    #[tokio::test]
+    async fn test_client_connection_logic() {
+        let (connection, _rx) = ConnectionManager::new();
+        let app_state = Arc::new(AppState { connection });
+        
+        let app = mock_builder()
+            .manage(app_state.clone())
+            .invoke_handler(tauri::generate_handler![connect_server, send_protocol, client_ready])
+            .build(mock_context(noop_assets()))
+            .unwrap();
+
+        // Access state through the app handle
+        let state: State<Arc<AppState>> = app.state();
+        
+        let result = send_protocol(
+            Protocol::Login { username: "Test".to_string() },
+            state,
+        ).await;
+        
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Not connected");
     }
 }
