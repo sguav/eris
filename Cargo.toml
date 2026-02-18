@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/client",
+members = [
     "crates/server",
 ]
+# "crates/client" temporarily disabled until native dependencies are resolved

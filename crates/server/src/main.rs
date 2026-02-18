@@ -91,12 +91,82 @@ fn generate_self_signed_cert(cert_path: &str, key_path: &str) -> Result<(), Box<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage};
+    use futures_util::{SinkExt, StreamExt};
 
     #[tokio::test]
-    async fn test_websocket_login_integration() {
-        // Updated to use the new AppState::new signature
+    async fn test_strict_multi_user_flow() {
         let (broadcast_tx, _) = broadcast::channel(100);
-        let _state = Arc::new(AppState::new(broadcast_tx, "test_token".to_string()));
-        // Integration logic remains disabled/placeholder for now as per previous mandate
+        let token = "test_token_123".to_string();
+        let state = Arc::new(AppState::new(broadcast_tx, token.clone()));
+
+        let app = Router::new()
+            .route("/ws", get(ws_handler))
+            .with_state(state);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let url = format!("ws://{}/ws?token={}", addr, token);
+
+        // Connect User A
+        let (mut ws_a, _) = connect_async(&url).await.unwrap();
+        ws_a.send(WsMessage::Text(json!({"type": "Login", "payload": {"username": "Alice"}}).to_string())).await.unwrap();
+        
+        // Skip Identify
+        let _ = ws_a.next().await.unwrap().unwrap();
+
+        // Connect User B
+        let (mut ws_b, _) = connect_async(&url).await.unwrap();
+        ws_b.send(WsMessage::Text(json!({"type": "Login", "payload": {"username": "Bob"}}).to_string())).await.unwrap();
+        
+        // Alice should eventually see Bob join
+        let mut bob_joined = false;
+        for _ in 0..5 { // Check a few messages
+            let msg = ws_a.next().await.unwrap().unwrap();
+            let text = msg.to_text().unwrap();
+            if text.contains("Bob joined lobby") {
+                bob_joined = true;
+                break;
+            }
+        }
+        assert!(bob_joined, "Alice never saw Bob join");
+
+        // Alice switches to 'gaming'
+        ws_a.send(WsMessage::Text(json!({"type": "JoinChannel", "payload": {"channel": "gaming"}}).to_string())).await.unwrap();
+        
+        // Bob switches to 'gaming'
+        ws_b.send(WsMessage::Text(json!({"type": "JoinChannel", "payload": {"channel": "gaming"}}).to_string())).await.unwrap();
+        
+        // Alice should eventually see Bob move to gaming
+        let mut bob_moved = false;
+        for _ in 0..5 {
+            let msg = ws_a.next().await.unwrap().unwrap();
+            let text = msg.to_text().unwrap();
+            if text.contains("Bob moved to gaming") {
+                bob_moved = true;
+                break;
+            }
+        }
+        assert!(bob_moved, "Alice never saw Bob move to gaming");
+
+        // Bob sends message to 'gaming' - Alice SHOULD receive it
+        ws_b.send(WsMessage::Text(json!({"type": "ChatMessage", "payload": {"content": "Hello Alice", "author": "Bob", "channel": "gaming"}}).to_string())).await.unwrap();
+        
+        let mut alice_received = false;
+        for _ in 0..5 {
+            let msg = ws_a.next().await.unwrap().unwrap();
+            let text = msg.to_text().unwrap();
+            if text.contains("Hello Alice") {
+                alice_received = true;
+                break;
+            }
+        }
+        assert!(alice_received, "Alice never received Bob's message");
     }
 }
