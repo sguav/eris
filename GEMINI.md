@@ -2,31 +2,44 @@
 
 Eris is a self-contained hub that functions as both a WebRTC signaling server and a secure web UI server.
 
+## Project Mandates
+
+- **Architectural Integrity**: Any significant structural or architectural change (e.g., modularization, switching protocols, changing ports) **MUST** be immediately reflected in this document.
+- **Documentation Parity**: Every architectural change must be accompanied by a dedicated commit that updates `GEMINI.md`.
+- **Security First**: Features requiring hardware access (mic/camera) must be served over HTTPS to ensure a Secure Context.
+
 ## Project Overview
 
-- **Purpose:** A unified core for signaling (WebSocket relay) and serving a web-based UI over HTTPS.
-- **Primary Technologies:**
-    - **Backend:** Rust, Axum, Axum-server (TLS), rcgen (Self-signed certs).
-    - **Frontend:** Vanilla JS, served from the `www` directory.
-- **Security:** Serves over HTTPS by default (port 8443) to provide a "Secure Context" required for microphone access on mobile browsers.
+- **Purpose**: A unified core for signaling (WebSocket relay) and serving a web-based UI over HTTPS.
+- **Primary Technologies**:
+    - **Backend**: Rust, Axum, Axum-server (TLS), rcgen (Self-signed certs).
+    - **Architecture**: Modular design with separate `protocol`, `state`, and `handlers`.
+    - **Frontend**: Vanilla JS (React-free for standalone simplicity), served via `ServeDir`.
+- **Security**: Serves over HTTPS by default (port 8443) using automatically generated self-signed certificates.
 
 ## Building and Running
 
-- **Run the server:**
+- **Run the server**:
   ```bash
   cargo run
   ```
   - Access UI at `https://[IP]:8443`.
-  - The server automatically generates `cert.pem` and `key.pem` on first run.
-  - You will see a "Your connection is not private" warning in browsers because the certificate is self-signed. Click **Advanced -> Proceed** to enter.
+  - The server generates `cert.pem` and `key.pem` on first run.
+  - **Browser Warning**: Since the certificate is self-signed, you must click **Advanced -> Proceed** (or similar) to allow the connection.
 
-- **Build/Test:** Standard `cargo build` and `cargo test`.
+- **Build/Test**:
+  ```bash
+  cargo build
+  cargo test
+  ```
 
 ## Development Conventions
 
-- **Protocol:** JSON messages defined in `src/protocol.rs`.
-- **State:** Managed in `src/state.rs` with a 50-message history buffer.
-- **Handlers:** WebSocket logic isolated in `src/handlers/websocket.rs`.
+- **Module Structure**:
+    - `src/protocol.rs`: Message definitions (The "Interface").
+    - `src/state.rs`: Shared state and history (The "Memory").
+    - `src/handlers/`: Route and WebSocket logic (The "Logic").
+- **Protocol**: JSON-tagged enum (`type`/`payload`).
 
 ## Key Files
 
