@@ -9,6 +9,8 @@ pub enum Protocol {
     Identify { id: Uuid, username: String },
     PeerList { peers: Vec<PeerInfo> },
     ChatMessage { channel: String, author: String, content: String },
+    ScreenState { is_sharing: bool },
+    RequestStream { target_id: Uuid },
     Signal { target_id: Uuid, data: serde_json::Value },
     System { message: String, severity: String },
 }
@@ -18,6 +20,7 @@ pub struct PeerInfo {
     pub id: Uuid,
     pub username: String,
     pub channel: String,
+    pub is_sharing: bool,
 }
 
 #[cfg(test)]

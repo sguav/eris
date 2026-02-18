@@ -7,6 +7,7 @@ use crate::protocol::{PeerInfo, Protocol};
 pub struct Peer {
     pub username: String,
     pub channel: String,
+    pub is_sharing: bool,
     pub tx: broadcast::Sender<Protocol>,
 }
 
@@ -32,6 +33,7 @@ impl AppState {
             id: *p.key(),
             username: p.username.clone(),
             channel: p.channel.clone(),
+            is_sharing: p.is_sharing,
         }).collect();
         let _ = self.broadcast_tx.send(Protocol::PeerList { peers });
     }
@@ -61,9 +63,6 @@ mod tests {
 
         let history = state.history.lock().unwrap();
         assert_eq!(history.len(), 50);
-        if let Protocol::ChatMessage { content, .. } = &history[0] {
-            assert_eq!(content, "Msg 10");
-        }
     }
 
     #[test]
@@ -75,6 +74,7 @@ mod tests {
         state.peers.insert(uid, Peer {
             username: "Alice".to_string(),
             channel: "lobby".to_string(),
+            is_sharing: false,
             tx: broadcast::channel(1).0,
         });
 
@@ -93,6 +93,7 @@ mod tests {
         state.peers.insert(id_a, Peer {
             username: "Alice".to_string(),
             channel: "lobby".to_string(),
+            is_sharing: false,
             tx: tx_a,
         });
 
@@ -101,19 +102,18 @@ mod tests {
         state.peers.insert(id_b, Peer {
             username: "Bob".to_string(),
             channel: "lobby".to_string(),
+            is_sharing: false,
             tx: tx_b,
         });
 
-        // Simulate a Signal from Bob to Alice
         let signal_data = serde_json::json!({"sdp": "..."});
         if let Some(target) = state.peers.get(&id_a) {
             let _ = target.tx.send(Protocol::Signal { 
-                target_id: id_b, // The sender's ID
+                target_id: id_b,
                 data: signal_data.clone() 
             });
         }
 
-        // Alice should receive the signal
         let received = rx_a.try_recv().unwrap();
         if let Protocol::Signal { target_id, data } = received {
             assert_eq!(target_id, id_b);

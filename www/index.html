@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -61,7 +60,7 @@
         flex: 1;
         display: flex;
         flex-direction: column;
-        min-width: 0; /* Fix flexbox overflow */
+        min-width: 0;
     }
     .sidebar {
         width: 250px;
@@ -188,10 +187,26 @@
         display: flex;
         align-items: center;
         gap: 0.5rem;
+        justify-content: space-between;
     }
     .nav-item:hover { background: rgba(255,255,255,0.05); }
     .nav-item.active { background: rgba(59, 130, 246, 0.1); color: var(--accent); }
     
+    .watch-badge {
+        font-size: 0.7rem;
+        background: var(--error);
+        color: white;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: bold;
+        animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.6; }
+        100% { opacity: 1; }
+    }
+
     #controls-area {
         margin-top: auto;
         padding-top: 1rem;
@@ -224,9 +239,9 @@
         <div>
             <div class="section-title">Channels</div>
             <ul id="channel-list" class="list-nav">
-                <li class="nav-item active" onclick="switchChannel('lobby')"><i class="fas fa-hashtag"></i> lobby</li>
-                <li class="nav-item" onclick="switchChannel('gaming')"><i class="fas fa-gamepad"></i> gaming</li>
-                <li class="nav-item" onclick="switchChannel('voice')"><i class="fas fa-microphone"></i> voice-only</li>
+                <li class="nav-item active" onclick="switchChannel('lobby')"><span><i class="fas fa-hashtag"></i> lobby</span></li>
+                <li class="nav-item" onclick="switchChannel('gaming')"><span><i class="fas fa-gamepad"></i> gaming</span></li>
+                <li class="nav-item" onclick="switchChannel('voice')"><span><i class="fas fa-microphone"></i> voice-only</span></li>
             </ul>
         </div>
 
@@ -292,9 +307,10 @@
     
     let localStream = null;
     let screenStream = null;
-    let peerConnections = {}; // targetId -> RTCPeerConnection
+    let peerConnections = {}; 
     let inVoice = false;
     let inScreen = false;
+    let watchingPeers = new Set();
 
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -335,6 +351,9 @@
             case 'Signal':
                 handleSignal(msg.payload.target_id, msg.payload.data);
                 break;
+            case 'RequestStream':
+                if (inScreen) createPeerConnection(msg.payload.target_id, true);
+                break;
             case 'System':
                 addMessage(msg);
                 break;
@@ -356,6 +375,10 @@
         ws.send(JSON.stringify({ type: 'JoinChannel', payload: { channel: name } }));
         
         if (inScreen) stopScreen();
+        watchingPeers.clear();
+        videoGrid.innerHTML = '';
+        videoGrid.classList.add('hidden');
+
         if (name === 'voice') {
             startVoice();
         } else if (previousChannel === 'voice' && inVoice) {
@@ -372,11 +395,20 @@
         peerListEl.innerHTML = peers
             .filter(p => p.channel === currentChannel)
             .map(p => `
-                <li class="nav-item">
-                    <span class="status-dot connected"></span>
-                    <span style="${p.id === myId ? 'color: var(--accent); font-weight: bold;' : ''}">${p.username} ${p.id === myId ? '(You)' : ''}</span>
+                <li class="nav-item" onclick="${p.is_sharing && p.id !== myId ? `watchStream('${p.id}')` : ''}">
+                    <div style="display:flex; align-items:center; gap:0.5rem">
+                        <span class="status-dot connected"></span>
+                        <span style="${p.id === myId ? 'color: var(--accent); font-weight: bold;' : ''}">${p.username} ${p.id === myId ? '(You)' : ''}</span>
+                    </div>
+                    ${p.is_sharing && p.id !== myId ? '<span class="watch-badge">LIVE</span>' : ''}
                 </li>
             `).join('');
+    }
+
+    async function watchStream(targetId) {
+        if (watchingPeers.has(targetId)) return;
+        watchingPeers.add(targetId);
+        ws.send(JSON.stringify({ type: 'RequestStream', payload: { target_id: targetId } }));
     }
 
     async function toggleVoice() {
@@ -388,7 +420,7 @@
             localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
             inVoice = true;
             btnVoice.classList.add('active');
-            btnVoice.innerText = 'Leave Voice';
+            btnVoice.innerHTML = '<i class="fas fa-phone-slash"></i> Leave Voice';
             peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => createPeerConnection(peer.id, true));
         } catch (err) {
             addMessage({ type: 'System', payload: { message: "Mic access denied", severity: 'error' }});
@@ -398,7 +430,7 @@
     function stopVoice() {
         inVoice = false;
         btnVoice.classList.remove('active');
-        btnVoice.innerText = 'Join Voice';
+        btnVoice.innerHTML = '<i class="fas fa-phone"></i> Join Voice';
         if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
         cleanupDeadConnections();
     }
@@ -412,20 +444,13 @@
             screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
             inScreen = true;
             btnScreen.classList.add('active');
-            btnScreen.innerText = 'Stop Sharing';
+            btnScreen.innerHTML = '<i class="fas fa-stop"></i> Stop Sharing';
             videoGrid.classList.remove('hidden');
             
-            // Add self video
             addVideoElement('me', screenStream, 'You (Sharing)');
+            ws.send(JSON.stringify({ type: 'ScreenState', payload: { is_sharing: true } }));
 
-            // Handle stop from browser UI
             screenStream.getVideoTracks()[0].onended = () => stopScreen();
-
-            // Re-negotiate all connections with video
-            peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => {
-                const pc = createPeerConnection(peer.id, true);
-                screenStream.getTracks().forEach(track => pc.addTrack(track, screenStream));
-            });
         } catch (err) {
             console.error(err);
         }
@@ -434,15 +459,16 @@
     function stopScreen() {
         inScreen = false;
         btnScreen.classList.remove('active');
-        btnScreen.innerText = 'Share Screen';
+        btnScreen.innerHTML = '<i class="fas fa-desktop"></i> Share Screen';
         if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
         removeVideoElement('me');
         if (videoGrid.children.length === 0) videoGrid.classList.add('hidden');
+        ws.send(JSON.stringify({ type: 'ScreenState', payload: { is_sharing: false } }));
         cleanupDeadConnections();
     }
 
     function cleanupDeadConnections() {
-        if (!inVoice && !inScreen) {
+        if (!inVoice && !inScreen && watchingPeers.size === 0) {
             Object.keys(peerConnections).forEach(id => {
                 peerConnections[id].close();
                 delete peerConnections[id];
@@ -546,6 +572,7 @@
       const user = usernameInput.value.trim();
       if (!user) return;
       myUsername = user;
+      loginError.innerText = '';
       loginBtn.disabled = true;
       if (ws.readyState === WebSocket.OPEN) sendLogin(user);
     };

@@ -64,6 +64,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             state.peers.insert(my_id, Peer { 
                 username: my_username.clone(), 
                 channel: "lobby".to_string(),
+                is_sharing: false,
                 tx: peer_tx.clone() 
             });
             
@@ -157,6 +158,18 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     Protocol::Signal { target_id, data } => {
                         if let Some(target) = state_clone.peers.get(&target_id) {
                             let _ = target.tx.send(Protocol::Signal { target_id: my_id, data });
+                        }
+                    }
+                    Protocol::ScreenState { is_sharing } => {
+                        if let Some(mut p) = state_clone.peers.get_mut(&my_id) {
+                            p.is_sharing = is_sharing;
+                        }
+                        let _ = state_clone.broadcast_tx.send(Protocol::ScreenState { is_sharing });
+                        state_clone.broadcast_peer_list();
+                    }
+                    Protocol::RequestStream { target_id } => {
+                        if let Some(target) = state_clone.peers.get(&target_id) {
+                            let _ = target.tx.send(Protocol::RequestStream { target_id: my_id });
                         }
                     }
                     _ => {}
