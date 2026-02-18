@@ -26,7 +26,17 @@ impl ServerCertVerifier for NoVerifier {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        vec![rustls::SignatureScheme::RSA_PSS_SHA256, rustls::SignatureScheme::ED25519, rustls::SignatureScheme::RSA_PKCS1_SHA256]
+        vec![
+            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
+            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
+            rustls::SignatureScheme::RSA_PSS_SHA256,
+            rustls::SignatureScheme::RSA_PSS_SHA384,
+            rustls::SignatureScheme::RSA_PSS_SHA512,
+            rustls::SignatureScheme::RSA_PKCS1_SHA256,
+            rustls::SignatureScheme::RSA_PKCS1_SHA384,
+            rustls::SignatureScheme::RSA_PKCS1_SHA512,
+            rustls::SignatureScheme::ED25519,
+        ]
     }
 }
 
