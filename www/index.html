@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -69,7 +70,7 @@
         <button type="submit" id="login-btn" style="padding: 1rem;">Join Server</button>
       </form>
     </div>
-    <div id="on-screen-debug">Initializing...</div>
+    <div id="on-screen-debug">Waiting for engine...</div>
   </div>
 
   <div id="chat-ui" class="container hidden">
@@ -102,278 +103,273 @@
   </div>
 
   <script>
-    // DEFENSIVE ERROR CATCHING
-    window.onerror = function(msg, url, line, col, error) {
-        alert("FATAL JS ERROR: " + msg + "\nAt: " + url + ":" + line);
-        return false;
-    };
-
-    const debugEl = document.getElementById('on-screen-debug');
-    function screenLog(msg) {
-        const line = document.createElement('div');
-        line.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
-        debugEl.appendChild(line);
-        debugEl.scrollTop = debugEl.scrollHeight;
-    }
-
-    screenLog("Script loading...");
-
-    // TAURI INTEGRATION
-    const isTauri = !!window.__TAURI_INTERNALS__ || !!window.__TAURI__;
-    screenLog("Environment: " + (isTauri ? "Tauri" : "Browser"));
-    
-    // Explicitly check window.__TAURI__ structure
-    if (isTauri) {
-        screenLog("Tauri Global found: " + Object.keys(window.__TAURI__).join(','));
-    }
-
-    const tauriCore = isTauri ? (window.__TAURI__.core || window.__TAURI__.tauri || window.__TAURI__) : { invoke: null };
-    const tauriEvent = isTauri ? (window.__TAURI__.event || window.__TAURI__) : { listen: null };
-    const { invoke } = tauriCore;
-    const { listen } = tauriEvent;
-
-    if (isTauri && invoke) {
-        const originalLog = console.log;
-        const originalError = console.error;
-        console.log = (...args) => {
-            const msg = args.map(a => String(a)).join(' ');
-            originalLog(...args);
-            screenLog("LOG: " + msg);
-            invoke('js_log', { level: 'INFO', message: msg }).catch(e => originalError("Log bridge fail", e));
-        };
-        console.error = (...args) => {
-            const msg = args.map(a => String(a)).join(' ');
-            originalError(...args);
-            screenLog("ERR: " + msg);
-            invoke('js_log', { level: 'ERROR', message: msg }).catch(e => originalError("Log bridge fail", e));
-        };
-    }
-
-    const STORAGE_KEY = 'eris_username';
-    const SERVER_KEY = 'eris_server';
-    const TOKEN_KEY = 'eris_token';
-    const loginScreen = document.getElementById('login-screen');
-    const chatUI = document.getElementById('chat-ui');
-    const sidebar = document.getElementById('sidebar');
-    const sidebarOverlay = document.getElementById('sidebar-overlay');
-    const menuToggle = document.getElementById('menu-toggle');
-    const loginForm = document.getElementById('login-form');
-    const serverInput = document.getElementById('server-input');
-    const tokenInput = document.getElementById('token-input');
-    const usernameInput = document.getElementById('username-input');
-    const loginError = document.getElementById('login-error');
-    const loginBtn = document.getElementById('login-btn');
-    const myNameDisplay = document.getElementById('my-name-display');
-    const btnLogout = document.getElementById('btn-logout');
-    const btnLogoutMobile = document.getElementById('btn-logout-mobile');
-    const msgContainer = document.getElementById('messages');
-    const chatForm = document.getElementById('chat-form');
-    const chatInput = document.getElementById('chat-input');
-    const statusDot = document.getElementById('status-dot');
-    const peerListEl = document.getElementById('peer-list');
-    const channelListEl = document.getElementById('channel-list');
-    const currentChannelNameEl = document.getElementById('current-channel-name');
-    const btnVoice = document.getElementById('btn-voice');
-    const btnScreen = document.getElementById('btn-screen');
-    const videoGrid = document.getElementById('video-grid');
-
-    let ws;
-    let myUsername = localStorage.getItem(STORAGE_KEY) || '';
-    let myServer = localStorage.getItem(SERVER_KEY) || (isTauri ? '' : window.location.host);
-    let myToken = localStorage.getItem(TOKEN_KEY) || '';
-    let myId = '';
-    let currentChannel = 'lobby';
-    let peers = [];
-    let localStream = null;
-    let screenStream = null;
-    let peerConnections = {}; 
-    let inVoice = false;
-    let inScreen = false;
-    let watchingPeers = new Set();
-    const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
-
-    serverInput.value = myServer;
-    usernameInput.value = myUsername;
-    tokenInput.value = myToken;
-
-    menuToggle.onclick = () => { sidebar.classList.add('open'); sidebarOverlay.classList.add('open'); };
-    sidebarOverlay.onclick = () => { sidebar.classList.remove('open'); sidebarOverlay.classList.remove('open'); };
-
-    async function connect() {
-      try {
-          screenLog("Connecting to " + myServer);
-          if (!myServer) return;
-          let protocol = 'wss:';
-          let host = myServer;
-          if (host.startsWith('https://')) { protocol = 'wss:'; host = host.replace('https://', ''); }
-          else if (host.startsWith('http://')) { protocol = 'ws:'; host = host.replace('http://', ''); }
-          else if (host.includes('8080')) { protocol = 'ws:'; }
-          
-          const urlParams = new URLSearchParams(window.location.search);
-          const token = urlParams.get('token') || myToken;
-          if (!token) { loginError.innerText = "Invite token required"; loginBtn.disabled = false; return; }
-          const url = `${protocol}//${host}/ws?token=${token}`;
-
-          if (isTauri && invoke) {
-              screenLog("Invoking Rust connect...");
-              try {
-                  await invoke('connect_server', { url });
-                  statusDot.className = 'status-dot connected';
-                  if (myUsername) sendLogin(myUsername);
-              } catch (e) {
-                  screenLog("Rust Connect Error: " + e);
-                  loginError.innerText = "Connection failed: " + e;
-                  loginBtn.disabled = false;
-              }
-          } else {
-              screenLog("Browser WebSocket opening...");
-              ws = new WebSocket(url);
-              ws.onopen = () => { statusDot.className = 'status-dot connected'; if (myUsername) sendLogin(myUsername); };
-              ws.onclose = (e) => { statusDot.className = 'status-dot disconnected'; setTimeout(connect, 2000); };
-              ws.onmessage = (event) => handleProtocolMsg(JSON.parse(event.data));
-              ws.onerror = (e) => { screenLog("WS Error"); loginError.innerText = "Connection error"; loginBtn.disabled = false; };
-          }
-      } catch (err) { screenLog("Connect fatal: " + err); loginBtn.disabled = false; }
-    }
-
-    if (isTauri && listen) {
-        listen('protocol-msg', (event) => handleProtocolMsg(event.payload)).then(() => {
-            screenLog("Listeners ready");
-            invoke('client_ready');
-        });
-    }
-
-    async function handleProtocolMsg(msg) {
-        console.log("Protocol: " + msg.type);
-        switch (msg.type) {
-            case 'Identify':
-                myId = msg.payload.id;
-                myUsername = msg.payload.username;
-                localStorage.setItem(STORAGE_KEY, myUsername);
-                localStorage.setItem(SERVER_KEY, myServer);
-                localStorage.setItem(TOKEN_KEY, myToken);
-                myNameDisplay.innerText = myUsername;
-                loginScreen.classList.add('hidden');
-                chatUI.classList.remove('hidden');
-                break;
-            case 'PeerList': peers = msg.payload.peers; renderPeers(); break;
-            case 'ChatMessage': if (msg.payload.channel === currentChannel) addMessage(msg); break;
-            case 'ScreenState':
-                if (!msg.payload.is_sharing) { removeVideoElement(msg.payload.peer_id); watchingPeers.delete(msg.payload.peer_id); if (videoGrid.children.length === 0) videoGrid.classList.add('hidden'); }
-                renderPeers();
-                break;
-            case 'Signal': handleSignal(msg.payload.target_id, msg.payload.data); break;
-            case 'RequestStream': if (inScreen) createPeerConnection(msg.payload.target_id, true); break;
-            case 'System': addMessage(msg); break;
+    (function() {
+        const debugEl = document.getElementById('on-screen-debug');
+        debugEl.innerText = "";
+        function screenLog(msg) {
+            const line = document.createElement('div');
+            line.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            debugEl.appendChild(line);
+            debugEl.scrollTop = debugEl.scrollHeight;
         }
-    }
 
-    async function sendCommand(msg) {
-        if (isTauri && invoke) { await invoke('send_protocol', { msg }); }
-        else if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify(msg)); }
-    }
+        screenLog("Stage 1: Script started");
 
-    function switchChannel(name) {
-        if (name === currentChannel) return;
-        const prev = currentChannel; currentChannel = name; msgContainer.innerHTML = '';
-        currentChannelNameEl.innerHTML = `<i class="fas fa-${name === 'voice' ? 'microphone' : (name === 'gaming' ? 'gamepad' : 'hashtag')}"></i> ${name}`;
-        chatInput.placeholder = `Message #${name}`;
-        Array.from(channelListEl.children).forEach(el => { el.classList.toggle('active', el.innerText.toLowerCase().includes(name)); });
-        sendCommand({ type: 'JoinChannel', payload: { channel: name } });
-        if (inScreen) stopScreen();
-        watchingPeers.forEach(id => removeVideoElement(id)); watchingPeers.clear(); videoGrid.classList.add('hidden');
-        if (name === 'voice') startVoice(); else if (prev === 'voice' && inVoice) stopVoice(); else if (inVoice) { stopVoice(); startVoice(); }
-        renderPeers(); sidebar.classList.remove('open'); sidebarOverlay.classList.remove('open');
-    }
+        window.onerror = function(msg, url, line) {
+            alert("JS Error: " + msg + "\nAt: " + line);
+            screenLog("FATAL: " + msg);
+        };
 
-    function renderPeers() {
-        peerListEl.innerHTML = peers.filter(p => p.channel === currentChannel).map(p => `
-            <li class="nav-item" onclick="${p.is_sharing && p.id !== myId ? `watchStream('${p.id}')` : ''}">
-                <div style="display:flex; align-items:center; gap:0.5rem"><span class="status-dot connected"></span><span style="${p.id === myId ? 'color: var(--accent); font-weight: bold;' : ''}">${p.username} ${p.id === myId ? '(You)' : ''}</span></div>
-                ${p.is_sharing && p.id !== myId ? '<span class="watch-badge">LIVE</span>' : ''}
-            </li>
-        `).join('');
-    }
+        const isTauri = !!window.__TAURI_INTERNALS__ || !!window.__TAURI__;
+        screenLog("Stage 2: Environment is " + (isTauri ? "Tauri" : "Browser"));
 
-    async function watchStream(targetId) { if (watchingPeers.has(targetId)) return; watchingPeers.add(targetId); sendCommand({ type: 'RequestStream', payload: { target_id: targetId } }); }
-    async function toggleVoice() { if (inVoice) stopVoice(); else await startVoice(); }
-    async function startVoice() {
-        try {
-            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            inVoice = true; btnVoice.classList.add('active'); btnVoice.innerHTML = '<i class="fas fa-phone-slash"></i> Leave Voice';
-            peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => createPeerConnection(peer.id, true));
-        } catch (err) { screenLog("Mic Error: " + err); }
-    }
-    function stopVoice() { inVoice = false; btnVoice.classList.remove('active'); btnVoice.innerHTML = '<i class="fas fa-phone"></i> Join Voice'; if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; } cleanupDeadConnections(); }
-    async function toggleScreen() { if (inScreen) stopScreen(); else await startScreen(); }
-    async function startScreen() {
-        try {
-            screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: { echoCancellation: false } });
-            inScreen = true; btnScreen.classList.add('active'); btnScreen.innerHTML = '<i class="fas fa-stop"></i> Stop Sharing'; videoGrid.classList.remove('hidden');
-            addVideoElement('me', screenStream, 'You (Sharing)'); sendCommand({ type: 'ScreenState', payload: { is_sharing: true, peer_id: myId } });
-            screenStream.getVideoTracks()[0].onended = () => stopScreen();
-            peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => createPeerConnection(peer.id, true));
-        } catch (err) { screenLog("Screen Error: " + err); }
-    }
-    function stopScreen() { inScreen = false; btnScreen.classList.remove('active'); btnScreen.innerHTML = '<i class="fas fa-desktop"></i> Share Screen'; if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; } removeVideoElement('me'); if (videoGrid.children.length === 0) videoGrid.classList.add('hidden'); sendCommand({ type: 'ScreenState', payload: { is_sharing: false, peer_id: myId } }); cleanupDeadConnections(); }
-    function cleanupDeadConnections() { if (!inVoice && !inScreen && watchingPeers.size === 0) { Object.keys(peerConnections).forEach(id => { peerConnections[id].close(); delete peerConnections[id]; }); } }
-    function createPeerConnection(targetId, isOfferor) {
-        if (peerConnections[targetId]) {
-            const pc = peerConnections[targetId]; const s = pc.getSenders();
-            if (localStream) localStream.getTracks().forEach(t => { if (!s.find(x => x.track === t)) pc.addTrack(t, localStream); });
-            if (screenStream) screenStream.getTracks().forEach(t => { if (!s.find(x => x.track === t)) pc.addTrack(t, screenStream); });
+        // Optimized API extraction for Tauri 2.0
+        let invoke = null;
+        let listen = null;
+
+        if (isTauri) {
+            try {
+                const t = window.__TAURI__;
+                invoke = t.core?.invoke || t.tauri?.invoke || t.invoke;
+                listen = t.event?.listen || t.listen;
+                screenLog("Stage 3: APIs extracted. Invoke: " + (!!invoke));
+            } catch (e) {
+                screenLog("Stage 3 FAIL: " + e.message);
+            }
+        }
+
+        if (isTauri && invoke) {
+            const originalLog = console.log;
+            console.log = (...args) => {
+                const msg = args.map(a => String(a)).join(' ');
+                originalLog(...args);
+                screenLog("INFO: " + msg);
+                invoke('js_log', { level: 'INFO', message: msg }).catch(e => {});
+            };
+            screenLog("Stage 4: Log bridge active");
+        }
+
+        const STORAGE_KEY = 'eris_username';
+        const SERVER_KEY = 'eris_server';
+        const TOKEN_KEY = 'eris_token';
+        const loginScreen = document.getElementById('login-screen');
+        const chatUI = document.getElementById('chat-ui');
+        const sidebar = document.getElementById('sidebar');
+        const sidebarOverlay = document.getElementById('sidebar-overlay');
+        const menuToggle = document.getElementById('menu-toggle');
+        const loginForm = document.getElementById('login-form');
+        const serverInput = document.getElementById('server-input');
+        const tokenInput = document.getElementById('token-input');
+        const usernameInput = document.getElementById('username-input');
+        const loginError = document.getElementById('login-error');
+        const loginBtn = document.getElementById('login-btn');
+        const myNameDisplay = document.getElementById('my-name-display');
+        const btnLogout = document.getElementById('btn-logout');
+        const btnLogoutMobile = document.getElementById('btn-logout-mobile');
+        const msgContainer = document.getElementById('messages');
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+        const statusDot = document.getElementById('status-dot');
+        const peerListEl = document.getElementById('peer-list');
+        const channelListEl = document.getElementById('channel-list');
+        const currentChannelNameEl = document.getElementById('current-channel-name');
+        const btnVoice = document.getElementById('btn-voice');
+        const btnScreen = document.getElementById('btn-screen');
+        const videoGrid = document.getElementById('video-grid');
+
+        let ws;
+        let myUsername = localStorage.getItem(STORAGE_KEY) || '';
+        let myServer = localStorage.getItem(SERVER_KEY) || (isTauri ? '' : window.location.host);
+        let myToken = localStorage.getItem(TOKEN_KEY) || '';
+        let myId = '';
+        let currentChannel = 'lobby';
+        let peers = [];
+        let localStream = null;
+        let screenStream = null;
+        let peerConnections = {}; 
+        let inVoice = false;
+        let inScreen = false;
+        let watchingPeers = new Set();
+        const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
+
+        serverInput.value = myServer;
+        usernameInput.value = myUsername;
+        tokenInput.value = myToken;
+
+        menuToggle.onclick = () => { sidebar.classList.add('open'); sidebarOverlay.classList.add('open'); };
+        sidebarOverlay.onclick = () => { sidebar.classList.remove('open'); sidebarOverlay.classList.remove('open'); };
+
+        async function connect() {
+          try {
+              screenLog("Connection attempt...");
+              if (!myServer) return;
+              let protocol = 'wss:';
+              let host = myServer;
+              if (host.startsWith('https://')) { protocol = 'wss:'; host = host.replace('https://', ''); }
+              else if (host.startsWith('http://')) { protocol = 'ws:'; host = host.replace('http://', ''); }
+              else if (host.includes('8080')) { protocol = 'ws:'; }
+              
+              const token = tokenInput.value.trim() || myToken;
+              if (!token) { loginError.innerText = "Invite token required"; loginBtn.disabled = false; return; }
+              const url = `${protocol}//${host}/ws?token=${token}`;
+
+              if (isTauri && invoke) {
+                  screenLog("Invoking connect_server...");
+                  try {
+                      await invoke('connect_server', { url });
+                      statusDot.className = 'status-dot connected';
+                      if (myUsername) sendLogin(myUsername);
+                  } catch (e) {
+                      screenLog("ERR: " + e);
+                      loginError.innerText = "Connection failed: " + e;
+                      loginBtn.disabled = false;
+                  }
+              } else {
+                  screenLog("Standard WebSocket...");
+                  ws = new WebSocket(url);
+                  ws.onopen = () => { statusDot.className = 'status-dot connected'; if (myUsername) sendLogin(myUsername); };
+                  ws.onclose = () => { statusDot.className = 'status-dot disconnected'; setTimeout(connect, 2000); };
+                  ws.onmessage = (event) => handleProtocolMsg(JSON.parse(event.data));
+                  ws.onerror = () => { loginError.innerText = "WS Error"; loginBtn.disabled = false; };
+              }
+          } catch (err) { screenLog("Fatal: " + err); loginBtn.disabled = false; }
+        }
+
+        if (isTauri && listen) {
+            listen('protocol-msg', (event) => handleProtocolMsg(event.payload)).then(() => {
+                screenLog("Stage 5: Listeners active");
+                invoke('client_ready');
+            });
+        }
+
+        async function handleProtocolMsg(msg) {
+            switch (msg.type) {
+                case 'Identify':
+                    myId = msg.payload.id; myUsername = msg.payload.username;
+                    localStorage.setItem(STORAGE_KEY, myUsername);
+                    localStorage.setItem(SERVER_KEY, myServer);
+                    localStorage.setItem(TOKEN_KEY, myToken);
+                    myNameDisplay.innerText = myUsername;
+                    loginScreen.classList.add('hidden'); chatUI.classList.remove('hidden');
+                    break;
+                case 'PeerList': peers = msg.payload.peers; renderPeers(); break;
+                case 'ChatMessage': if (msg.payload.channel === currentChannel) addMessage(msg); break;
+                case 'ScreenState':
+                    if (!msg.payload.is_sharing) { removeVideoElement(msg.payload.peer_id); watchingPeers.delete(msg.payload.peer_id); if (videoGrid.children.length === 0) videoGrid.classList.add('hidden'); }
+                    renderPeers();
+                    break;
+                case 'Signal': handleSignal(msg.payload.target_id, msg.payload.data); break;
+                case 'RequestStream': if (inScreen) createPeerConnection(msg.payload.target_id, true); break;
+                case 'System': addMessage(msg); break;
+            }
+        }
+
+        async function sendCommand(msg) {
+            if (isTauri && invoke) { await invoke('send_protocol', { msg }); }
+            else if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify(msg)); }
+        }
+
+        function switchChannel(name) {
+            if (name === currentChannel) return;
+            const prev = currentChannel; currentChannel = name; msgContainer.innerHTML = '';
+            currentChannelNameEl.innerHTML = `<i class="fas fa-${name === 'voice' ? 'microphone' : (name === 'gaming' ? 'gamepad' : 'hashtag')}"></i> ${name}`;
+            Array.from(channelListEl.children).forEach(el => { el.classList.toggle('active', el.innerText.toLowerCase().includes(name)); });
+            sendCommand({ type: 'JoinChannel', payload: { channel: name } });
+            if (inScreen) stopScreen();
+            watchingPeers.forEach(id => removeVideoElement(id)); watchingPeers.clear(); videoGrid.classList.add('hidden');
+            if (name === 'voice') startVoice(); else if (prev === 'voice' && inVoice) stopVoice(); else if (inVoice) { stopVoice(); startVoice(); }
+            renderPeers(); sidebar.classList.remove('open'); sidebarOverlay.classList.remove('open');
+        }
+
+        function renderPeers() {
+            peerListEl.innerHTML = peers.filter(p => p.channel === currentChannel).map(p => `
+                <li class="nav-item" onclick="${p.is_sharing && p.id !== myId ? `watchStream('${p.id}')` : ''}">
+                    <div style="display:flex; align-items:center; gap:0.5rem"><span class="status-dot connected"></span><span>${p.username} ${p.id === myId ? '(You)' : ''}</span></div>
+                    ${p.is_sharing && p.id !== myId ? '<span class="watch-badge">LIVE</span>' : ''}
+                </li>
+            `).join('');
+        }
+
+        async function watchStream(targetId) { if (watchingPeers.has(targetId)) return; watchingPeers.add(targetId); sendCommand({ type: 'RequestStream', payload: { target_id: targetId } }); }
+        async function toggleVoice() { if (inVoice) stopVoice(); else await startVoice(); }
+        async function startVoice() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                inVoice = true; btnVoice.classList.add('active'); btnVoice.innerHTML = '<i class="fas fa-phone-slash"></i> Leave Voice';
+                peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => createPeerConnection(peer.id, true));
+            } catch (err) { screenLog("Mic Error: " + err); }
+        }
+        function stopVoice() { inVoice = false; btnVoice.classList.remove('active'); btnVoice.innerHTML = '<i class="fas fa-phone"></i> Join Voice'; if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; } cleanupDeadConnections(); }
+        async function toggleScreen() { if (inScreen) stopScreen(); else await startScreen(); }
+        async function startScreen() {
+            try {
+                screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: { echoCancellation: false } });
+                inScreen = true; btnScreen.classList.add('active'); btnScreen.innerHTML = '<i class="fas fa-stop"></i> Stop Sharing'; videoGrid.classList.remove('hidden');
+                addVideoElement('me', screenStream, 'You (Sharing)'); sendCommand({ type: 'ScreenState', payload: { is_sharing: true, peer_id: myId } });
+                screenStream.getVideoTracks()[0].onended = () => stopScreen();
+                peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => createPeerConnection(peer.id, true));
+            } catch (err) { screenLog("Screen Error: " + err); }
+        }
+        function stopScreen() { inScreen = false; btnScreen.classList.remove('active'); btnScreen.innerHTML = '<i class="fas fa-desktop"></i> Share Screen'; if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; } removeVideoElement('me'); if (videoGrid.children.length === 0) videoGrid.classList.add('hidden'); sendCommand({ type: 'ScreenState', payload: { is_sharing: false, peer_id: myId } }); cleanupDeadConnections(); }
+        function cleanupDeadConnections() { if (!inVoice && !inScreen && watchingPeers.size === 0) { Object.keys(peerConnections).forEach(id => { peerConnections[id].close(); delete peerConnections[id]; }); } }
+        function createPeerConnection(targetId, isOfferor) {
+            if (peerConnections[targetId]) {
+                const pc = peerConnections[targetId]; const s = pc.getSenders();
+                if (localStream) localStream.getTracks().forEach(t => { if (!s.find(x => x.track === t)) pc.addTrack(t, localStream); });
+                if (screenStream) screenStream.getTracks().forEach(t => { if (!s.find(x => x.track === t)) pc.addTrack(t, screenStream); });
+                if (isOfferor) pc.createOffer().then(o => pc.setLocalDescription(o)).then(() => sendSignal(targetId, { sdp: pc.localDescription }));
+                return pc;
+            }
+            const pc = new RTCPeerConnection(rtcConfig); peerConnections[targetId] = pc;
+            if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+            if (screenStream) screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
+            pc.onicecandidate = (e) => e.candidate && sendSignal(targetId, { ice: e.candidate });
+            pc.ontrack = (e) => {
+                const stream = e.streams[0];
+                if (e.track.kind === 'video') { videoGrid.classList.remove('hidden'); addVideoElement(targetId, stream, peers.find(p => p.id === targetId)?.username || 'Peer'); }
+                else { const a = document.createElement('audio'); a.autoplay = true; a.srcObject = new MediaStream([e.track]); a.style.display = 'none'; document.body.appendChild(a); e.track.onended = () => a.remove(); }
+            };
             if (isOfferor) pc.createOffer().then(o => pc.setLocalDescription(o)).then(() => sendSignal(targetId, { sdp: pc.localDescription }));
             return pc;
         }
-        const pc = new RTCPeerConnection(rtcConfig); peerConnections[targetId] = pc;
-        if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-        if (screenStream) screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
-        pc.onicecandidate = (e) => e.candidate && sendSignal(targetId, { ice: e.candidate });
-        pc.ontrack = (e) => {
-            const stream = e.streams[0];
-            if (e.track.kind === 'video') { videoGrid.classList.remove('hidden'); addVideoElement(targetId, stream, peers.find(p => p.id === targetId)?.username || 'Peer'); }
-            else { const a = document.createElement('audio'); a.autoplay = true; a.srcObject = new MediaStream([e.track]); a.style.display = 'none'; document.body.appendChild(a); e.track.onended = () => a.remove(); }
+        async function handleSignal(fromId, data) {
+            let pc = peerConnections[fromId];
+            if (data.sdp) {
+                if (!pc) pc = createPeerConnection(fromId, false);
+                await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                if (data.sdp.type === 'offer') { const a = await pc.createAnswer(); await pc.setLocalDescription(a); sendSignal(fromId, { sdp: pc.localDescription }); }
+            } else if (data.ice && pc) { await pc.addIceCandidate(new RTCIceCandidate(data.ice)); }
+        }
+        function addVideoElement(id, stream, label) { removeVideoElement(id); const c = document.createElement('div'); c.id = `video-${id}`; c.className = 'video-container'; const v = document.createElement('video'); v.srcObject = stream; v.autoplay = true; v.playsInline = true; if (id === 'me') v.muted = true; const l = document.createElement('div'); l.className = 'video-label'; l.innerText = label; c.appendChild(v); c.appendChild(l); videoGrid.appendChild(c); }
+        function removeVideoElement(id) { const el = document.getElementById(`video-${id}`); if (el) el.remove(); }
+        function sendSignal(targetId, data) { sendCommand({ type: 'Signal', payload: { target_id: targetId, data } }); }
+        function sendLogin(username) { sendCommand({ type: 'Login', payload: { username } }); }
+        function addMessage(msg) { const d = document.createElement('div'); if (msg.type === 'ChatMessage') { d.className = 'msg'; const isMe = msg.payload.author === myUsername; if (isMe) d.style.alignSelf = 'flex-end'; d.innerHTML = `<span class="msg-author" style="${isMe ? 'color: #10b981' : ''}">${msg.payload.author}:</span> ${msg.payload.content}`; } else if (msg.type === 'System') { d.className = `msg msg-system`; d.innerText = msg.payload.message; } msgContainer.appendChild(d); msgContainer.scrollTop = msgContainer.scrollHeight; }
+
+        loginForm.onsubmit = (e) => {
+          e.preventDefault();
+          const user = usernameInput.value.trim();
+          const server = serverInput.value.trim();
+          const token = tokenInput.value.trim();
+          screenLog("Join Action Triggered");
+          if (!user || !server || !token) { loginError.innerText = "Missing fields"; return; }
+          myUsername = user; myServer = server; myToken = token; loginError.innerText = ''; loginBtn.disabled = true;
+          connect();
         };
-        if (isOfferor) pc.createOffer().then(o => pc.setLocalDescription(o)).then(() => sendSignal(targetId, { sdp: pc.localDescription }));
-        return pc;
-    }
-    async function handleSignal(fromId, data) {
-        let pc = peerConnections[fromId];
-        if (data.sdp) {
-            if (!pc) pc = createPeerConnection(fromId, false);
-            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-            if (data.sdp.type === 'offer') { const a = await pc.createAnswer(); await pc.setLocalDescription(a); sendSignal(fromId, { sdp: pc.localDescription }); }
-        } else if (data.ice && pc) { await pc.addIceCandidate(new RTCIceCandidate(data.ice)); }
-    }
-    function addVideoElement(id, stream, label) { removeVideoElement(id); const c = document.createElement('div'); c.id = `video-${id}`; c.className = 'video-container'; const v = document.createElement('video'); v.srcObject = stream; v.autoplay = true; v.playsInline = true; if (id === 'me') v.muted = true; const l = document.createElement('div'); l.className = 'video-label'; l.innerText = label; c.appendChild(v); c.appendChild(l); videoGrid.appendChild(c); }
-    function removeVideoElement(id) { const el = document.getElementById(`video-${id}`); if (el) el.remove(); }
-    function sendSignal(targetId, data) { sendCommand({ type: 'Signal', payload: { target_id: targetId, data } }); }
-    function sendLogin(username) { sendCommand({ type: 'Login', payload: { username } }); }
-    function addMessage(msg) { const d = document.createElement('div'); if (msg.type === 'ChatMessage') { d.className = 'msg'; const isMe = msg.payload.author === myUsername; if (isMe) d.style.alignSelf = 'flex-end'; d.innerHTML = `<span class="msg-author" style="${isMe ? 'color: #10b981' : ''}">${msg.payload.author}:</span> ${msg.payload.content}`; } else if (msg.type === 'System') { d.className = `msg msg-system`; d.innerText = msg.payload.message; } msgContainer.appendChild(d); msgContainer.scrollTop = msgContainer.scrollHeight; }
 
-    loginForm.onsubmit = (e) => {
-      e.preventDefault();
-      const user = usernameInput.value.trim();
-      const server = serverInput.value.trim();
-      const token = tokenInput.value.trim();
-      screenLog("Join Click: " + user + " @ " + server);
-      if (!user || !server || !token) { loginError.innerText = "All fields required"; return; }
-      myUsername = user; myServer = server; myToken = token; loginError.innerText = ''; loginBtn.disabled = true;
-      connect();
-    };
+        chatForm.onsubmit = (e) => {
+          e.preventDefault();
+          const content = chatInput.value.trim();
+          if (!content) return;
+          sendCommand({ type: 'ChatMessage', payload: { channel: currentChannel, author: myUsername, content } });
+          chatInput.value = '';
+        };
 
-    chatForm.onsubmit = (e) => {
-      e.preventDefault();
-      const content = chatInput.value.trim();
-      if (!content) return;
-      sendCommand({ type: 'ChatMessage', payload: { channel: currentChannel, author: myUsername, content } });
-      chatInput.value = '';
-    };
-
-    const logout = () => { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(SERVER_KEY); localStorage.removeItem(TOKEN_KEY); window.location.reload(); };
-    btnLogout.onclick = logout; btnLogoutMobile.onclick = logout; btnVoice.onclick = toggleVoice; btnScreen.onclick = toggleScreen;
-    if (myUsername && myServer && myToken) connect();
-    screenLog("Init complete");
+        const logout = () => { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(SERVER_KEY); localStorage.removeItem(TOKEN_KEY); window.location.reload(); };
+        btnLogout.onclick = logout; btnLogoutMobile.onclick = logout; btnVoice.onclick = toggleVoice; btnScreen.onclick = toggleScreen;
+        if (myUsername && myServer && myToken) connect();
+        screenLog("Stage 6: Init Complete");
+    })();
   </script>
 </body>
 </html>
