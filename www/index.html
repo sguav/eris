@@ -712,6 +712,8 @@
       const server = serverInput.value.trim();
       const token = tokenInput.value.trim();
       
+      console.log(`JOIN CLICKED - User: ${user}, Server: ${server}, Token length: ${token.length}`);
+      
       if (!user || !server || !token) {
           loginError.innerText = "All fields required";
           return;
