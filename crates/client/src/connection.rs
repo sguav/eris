@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 use futures_util::{SinkExt, StreamExt};
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::protocol::Message, Connector};
+use tokio_tungstenite::{connect_async_tls_with_config, connect_async_with_config, tungstenite::protocol::Message, Connector};
 use eris_core::{Protocol, log};
 use rustls::client::danger::{ServerCertVerifier, ServerCertVerified};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -32,6 +32,9 @@ impl ServerCertVerifier for NoVerifier {
 
 impl ConnectionManager {
     pub fn new() -> (Self, broadcast::Receiver<Protocol>) {
+        // Initialize rustls crypto provider (once)
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
         let (tx, rx) = broadcast::channel(100);
         (
             Self {
@@ -56,17 +59,22 @@ impl ConnectionManager {
     pub async fn connect(&self, url: String) -> Result<(), String> {
         log("CLIENT", &format!("Handshaking with WebSocket: {}", url));
         
-        let root_store = rustls::RootCertStore::empty();
-        let mut config = rustls::ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-        config.dangerous().set_certificate_verifier(Arc::new(NoVerifier));
-        
-        let connector = Connector::Rustls(Arc::new(config));
+        let ws_stream = if url.starts_with("wss://") {
+            let root_store = rustls::RootCertStore::empty();
+            let mut config = rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+            config.dangerous().set_certificate_verifier(Arc::new(NoVerifier));
+            let connector = Connector::Rustls(Arc::new(config));
+            
+            let (s, _) = connect_async_tls_with_config(url, None, false, Some(connector)).await.map_err(|e| e.to_string())?;
+            s
+        } else {
+            let (s, _) = connect_async_with_config(url, None, false).await.map_err(|e| e.to_string())?;
+            s
+        };
 
-        let (ws_stream, _) = connect_async_tls_with_config(url, None, false, Some(connector)).await.map_err(|e| e.to_string())?;
         let (sink, mut stream) = ws_stream.split();
-        
         *self.ws_sink.lock().await = Some(sink);
         
         let tx = self.broadcast_tx.clone();
@@ -82,14 +90,11 @@ impl ConnectionManager {
                             if *ready {
                                 let _ = tx.send(protocol_msg);
                             } else {
-                                log("CLIENT", "Buffering incoming message (frontend not ready)");
                                 buffer.lock().await.push(protocol_msg);
                             }
                         }
                     }
-                    Ok(other) => {
-                        log("CLIENT", &format!("Received non-text WS message: {:?}", other));
-                    }
+                    Ok(_) => {}
                     Err(e) => {
                         log("CLIENT", &format!("ERROR in WS receive loop: {}", e));
                         break;
