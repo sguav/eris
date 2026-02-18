@@ -2,6 +2,7 @@
 //! Purpose: Server Signaling + UI Web Server
 
 mod protocol;
+mod state;
 
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -10,35 +11,20 @@ use axum::{
     routing::get,
     Router,
 };
-use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
-use protocol::{PeerInfo, Protocol};
+use protocol::Protocol;
+use state::{AppState, Peer};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
 use uuid::Uuid;
-
-struct Peer {
-    username: String,
-    tx: broadcast::Sender<Protocol>,
-}
-
-struct AppState {
-    peers: DashMap<Uuid, Peer>,
-    broadcast_tx: broadcast::Sender<Protocol>,
-    history: std::sync::Mutex<Vec<Protocol>>,
-}
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
     let (broadcast_tx, _) = broadcast::channel(2048);
-    let state = Arc::new(AppState {
-        peers: DashMap::new(),
-        broadcast_tx,
-        history: std::sync::Mutex::new(Vec::new()),
-    });
+    let state = Arc::new(AppState::new(broadcast_tx));
 
     let app = Router::new()
         .route("/ws", get(ws_handler))
@@ -122,7 +108,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                 severity: "info".to_string() 
             });
 
-            broadcast_peer_list(&state);
+            state.broadcast_peer_list();
             break;
         }
     }
@@ -189,74 +175,13 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         message: format!("{} left", my_username), 
         severity: "info".to_string() 
     });
-    broadcast_peer_list(&state);
-}
-
-fn broadcast_peer_list(state: &Arc<AppState>) {
-    let peers: Vec<PeerInfo> = state.peers.iter().map(|p| PeerInfo {
-        id: *p.key(),
-        username: p.username.clone(),
-    }).collect();
-    let _ = state.broadcast_tx.send(Protocol::PeerList { peers });
+    state.broadcast_peer_list();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn test_history_buffer_limit() {
-        let (tx, _) = broadcast::channel(10);
-        let state = AppState {
-            peers: DashMap::new(),
-            broadcast_tx: tx,
-            history: std::sync::Mutex::new(Vec::new()),
-        };
-
-        // Fill history beyond limit
-        for i in 0..60 {
-            let msg = Protocol::ChatMessage { 
-                author: "System".to_string(), 
-                content: format!("Msg {}", i) 
-            };
-            let mut history = state.history.lock().unwrap();
-            history.push(msg);
-            if history.len() > 50 {
-                history.remove(0);
-            }
-        }
-
-        let history = state.history.lock().unwrap();
-        assert_eq!(history.len(), 50);
-        if let Protocol::ChatMessage { content, .. } = &history[0] {
-            assert_eq!(content, "Msg 10");
-        }
-    }
-
-    #[test]
-    fn test_username_uniqueness_logic() {
-        let (tx, _) = broadcast::channel(10);
-        let state = AppState {
-            peers: DashMap::new(),
-            broadcast_tx: tx,
-            history: std::sync::Mutex::new(Vec::new()),
-        };
-
-        let uid = Uuid::new_v4();
-        state.peers.insert(uid, Peer {
-            username: "Alice".to_string(),
-            tx: broadcast::channel(1).0,
-        });
-
-        let name_to_check = "alice"; // Case insensitive check
-        let is_taken = state.peers.iter().any(|p| p.username.to_lowercase() == name_to_check.to_lowercase());
-        
-        assert!(is_taken);
-        
-        let is_taken_bob = state.peers.iter().any(|p| p.username.to_lowercase() == "bob".to_lowercase());
-        assert!(!is_taken_bob);
-    }
 
     #[tokio::test]
     async fn test_websocket_login_integration() {
@@ -265,11 +190,7 @@ mod tests {
 
         // 1. Setup server on random port
         let (broadcast_tx, _) = broadcast::channel(100);
-        let state = Arc::new(AppState {
-            peers: DashMap::new(),
-            broadcast_tx,
-            history: std::sync::Mutex::new(Vec::new()),
-        });
+        let state = Arc::new(AppState::new(broadcast_tx));
 
         let app = Router::new()
             .route("/ws", get(ws_handler))
