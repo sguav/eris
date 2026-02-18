@@ -11,3 +11,6 @@ Cargo.lock
 
 # Environment files
 .env
+
+# Certificates
+*.pem
