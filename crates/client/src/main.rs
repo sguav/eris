@@ -60,7 +60,16 @@ fn create_app() -> tauri::App {
     tauri::Builder::default()
         .manage(state_clone)
         .setup(move |app| {
+            // FIXES FOR LINUX MEDIA ACCESS (WebKitGTK)
+            // 1. Disable WebKit Sandbox (Crucial for hardware access in some distros)
             std::env::set_var("WEBKIT_FORCE_SANDBOX", "0");
+            
+            // 2. Help with GStreamer/WebRTC crashes on some drivers
+            std::env::set_var("WEBPKI_ROOTS_PATH", "/etc/ssl/certs/ca-certificates.crt");
+            
+            // 3. Ensure we use the correct portal for screen/mic if available
+            std::env::set_var("GTK_USE_PORTAL", "1");
+
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 while let Ok(msg) = rx.recv().await {
