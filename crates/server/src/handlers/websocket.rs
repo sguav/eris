@@ -1,6 +1,6 @@
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    extract::{State, Query},
+    extract::{State, Query, ConnectInfo},
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
 use serde::Deserialize;
+use std::net::SocketAddr;
 
 use eris_core::{Protocol, log};
 use crate::state::{AppState, Peer};
@@ -20,15 +21,16 @@ pub struct WsQuery {
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     query: Query<WsQuery>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     if let Some(token) = &query.token {
         if token == &state.invite_token {
-            return ws.on_upgrade(|socket| handle_socket(socket, state)).into_response();
+            return ws.on_upgrade(move |socket| handle_socket(socket, state, addr)).into_response();
         }
     }
     
-    log("SERVER", "Unauthorized connection attempt rejected (invalid/missing token)");
+    log("SERVER", &format!("Unauthorized connection attempt rejected from {} (invalid/missing token)", addr));
     axum::http::Response::builder()
         .status(axum::http::StatusCode::UNAUTHORIZED)
         .body(axum::body::Body::empty())
@@ -36,7 +38,7 @@ pub async fn ws_handler(
         .into_response()
 }
 
-pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
+pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>, addr: SocketAddr) {
     let (mut sender, mut receiver) = socket.split();
     let my_id = Uuid::new_v4();
     let (peer_tx, mut peer_rx) = broadcast::channel(100);
@@ -62,7 +64,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             }
 
             my_username = name.to_string();
-            log("SERVER", &format!("Peer '{}' ({}) logged in", my_username, my_id));
+            log("SERVER", &format!("Peer '{}' ({}) connected from {}", my_username, my_id, addr));
             
             state.peers.insert(my_id, Peer { 
                 username: my_username.clone(), 

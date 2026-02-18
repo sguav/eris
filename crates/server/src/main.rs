@@ -19,6 +19,7 @@ use tokio::sync::broadcast;
 use std::path::Path;
 use rand::{distributions::Alphanumeric, Rng};
 use eris_core::log;
+use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() {
@@ -55,17 +56,16 @@ async fn main() {
     // --- Dual Port Listeners ---
     
     // 1. Plain HTTP/WS (8080)
-    let addr_plain = "0.0.0.0:8080";
-    let listener_plain = tokio::net::TcpListener::bind(addr_plain).await.unwrap();
+    let addr_plain: SocketAddr = "0.0.0.0:8080".parse().unwrap();
     let app_plain = app.clone();
     tokio::spawn(async move {
         log("SERVER", "Plain HTTP/WS listener started on port 8080");
-        axum::serve(listener_plain, app_plain).await.unwrap();
+        let listener = tokio::net::TcpListener::bind(addr_plain).await.unwrap();
+        axum::serve(listener, app_plain.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
     });
 
     // 2. Secure HTTPS/WSS (8443)
-    let addr_secure = "0.0.0.0:8443";
-    let socket_secure: std::net::SocketAddr = addr_secure.parse().unwrap();
+    let addr_secure: SocketAddr = "0.0.0.0:8443".parse().unwrap();
     
     let local_ip = local_ip_address::local_ip().map(|ip| ip.to_string()).unwrap_or_else(|_| "localhost".to_string());
     let invite_url = format!("https://{}:8443/?token={}", local_ip, invite_token);
@@ -75,8 +75,8 @@ async fn main() {
     qr2term::print_qr(&invite_url).ok();
     
     log("SERVER", "Secure HTTPS/WSS listener starting on port 8443...");
-    axum_server::bind_rustls(socket_secure, config)
-        .serve(app.into_make_service())
+    axum_server::bind_rustls(addr_secure, config)
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .unwrap();
 }
@@ -117,7 +117,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         
         tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
+            axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
         });
 
         let url = format!("ws://{}/ws?token={}", addr, token);
