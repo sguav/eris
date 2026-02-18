@@ -17,7 +17,17 @@ async fn connect_server(
     url: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    state.connection.connect(url).await
+    println!("Rust: Connecting to {}", url);
+    match state.connection.connect(url.clone()).await {
+        Ok(_) => {
+            println!("Rust: Connected successfully to {}", url);
+            Ok(())
+        },
+        Err(e) => {
+            eprintln!("Rust: Connection failed: {}", e);
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]

@@ -372,8 +372,11 @@
               statusDot.className = 'status-dot connected';
               if (myUsername) sendLogin(myUsername);
           } catch (e) {
+              console.error("Tauri Connection Error:", e);
               loginError.innerText = "Connection failed: " + e;
               loginBtn.disabled = false;
+              loginScreen.classList.remove('hidden');
+              chatUI.classList.add('hidden');
           }
       } else {
           ws = new WebSocket(url);

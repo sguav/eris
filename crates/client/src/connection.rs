@@ -3,7 +3,6 @@ use tokio::sync::{broadcast, Mutex};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use eris_core::Protocol;
-use serde_json::json;
 
 pub struct ConnectionManager {
     broadcast_tx: broadcast::Sender<Protocol>,
