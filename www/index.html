@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Eris Unified</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     :root {
       --bg: #050505;
@@ -192,9 +193,9 @@
         <div>
             <div class="section-title">Channels</div>
             <ul id="channel-list" class="list-nav">
-                <li class="nav-item active" onclick="switchChannel('lobby')"># lobby</li>
-                <li class="nav-item" onclick="switchChannel('gaming')"># gaming</li>
-                <li class="nav-item" onclick="switchChannel('voice')"># voice-only</li>
+                <li class="nav-item active" onclick="switchChannel('lobby')"><i class="fas fa-hashtag"></i> lobby</li>
+                <li class="nav-item" onclick="switchChannel('gaming')"><i class="fas fa-gamepad"></i> gaming</li>
+                <li class="nav-item" onclick="switchChannel('voice')"><i class="fas fa-microphone"></i> voice-only</li>
             </ul>
         </div>
 
@@ -306,16 +307,28 @@
 
     function switchChannel(name) {
         if (name === currentChannel) return;
+        const previousChannel = currentChannel;
         currentChannel = name;
         msgContainer.innerHTML = '';
-        currentChannelNameEl.innerText = `# ${name}`;
+        currentChannelNameEl.innerHTML = `<i class="fas fa-${name === 'voice' ? 'microphone' : (name === 'gaming' ? 'gamepad' : 'hashtag')}"></i> ${name}`;
         
         Array.from(channelListEl.children).forEach(el => {
-            el.classList.toggle('active', el.innerText.includes(name));
+            el.classList.toggle('active', el.innerText.toLowerCase().includes(name));
         });
 
         ws.send(JSON.stringify({ type: 'JoinChannel', payload: { channel: name } }));
-        if (inVoice) stopVoice(); 
+        
+        // Auto-join voice logic
+        if (name === 'voice') {
+            startVoice();
+        } else if (previousChannel === 'voice' && inVoice) {
+            stopVoice();
+        } else if (inVoice) {
+            // Re-establish voice mesh for the new channel
+            stopVoice();
+            startVoice();
+        }
+
         renderPeers();
     }
 
