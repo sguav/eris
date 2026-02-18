@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -70,7 +69,7 @@
         <button type="submit" id="login-btn" style="padding: 1rem;">Join Server</button>
       </form>
     </div>
-    <div id="on-screen-debug">Waiting for engine...</div>
+    <div id="on-screen-debug">Initializing...</div>
   </div>
 
   <div id="chat-ui" class="container hidden">
@@ -116,14 +115,13 @@
         screenLog("Stage 1: Script started");
 
         window.onerror = function(msg, url, line) {
-            alert("JS Error: " + msg + "\nAt: " + line);
-            screenLog("FATAL: " + msg);
+            screenLog("FATAL ERROR: " + msg + " at line " + line);
+            return false;
         };
 
         const isTauri = !!window.__TAURI_INTERNALS__ || !!window.__TAURI__;
         screenLog("Stage 2: Environment is " + (isTauri ? "Tauri" : "Browser"));
 
-        // Optimized API extraction for Tauri 2.0
         let invoke = null;
         let listen = null;
 
@@ -132,7 +130,7 @@
                 const t = window.__TAURI__;
                 invoke = t.core?.invoke || t.tauri?.invoke || t.invoke;
                 listen = t.event?.listen || t.listen;
-                screenLog("Stage 3: APIs extracted. Invoke: " + (!!invoke));
+                screenLog("Stage 3: APIs extracted. Invoke available: " + (!!invoke));
             } catch (e) {
                 screenLog("Stage 3 FAIL: " + e.message);
             }
@@ -143,10 +141,32 @@
             console.log = (...args) => {
                 const msg = args.map(a => String(a)).join(' ');
                 originalLog(...args);
-                screenLog("INFO: " + msg);
+                screenLog("LOG: " + msg);
                 invoke('js_log', { level: 'INFO', message: msg }).catch(e => {});
             };
+            const originalError = console.error;
+            console.error = (...args) => {
+                const msg = args.map(a => String(a)).join(' ');
+                originalError(...args);
+                screenLog("ERR: " + msg);
+                invoke('js_log', { level: 'ERROR', message: msg }).catch(e => {});
+            };
             screenLog("Stage 4: Log bridge active");
+        }
+
+        async function checkMediaCapabilities() {
+            screenLog("Checking Media Capabilities...");
+            if (!navigator.mediaDevices) {
+                screenLog("CRITICAL: navigator.mediaDevices is UNDEFINED");
+                return;
+            }
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                screenLog("Found " + devices.length + " media devices");
+                devices.forEach(d => screenLog(` - ${d.kind}: ${d.label || 'unlabeled'}`));
+            } catch (e) {
+                screenLog("enumerateDevices FAIL: " + e.message);
+            }
         }
 
         const STORAGE_KEY = 'eris_username';
@@ -201,7 +221,7 @@
 
         async function connect() {
           try {
-              screenLog("Connection attempt...");
+              screenLog("Starting connection to " + myServer);
               if (!myServer) return;
               let protocol = 'wss:';
               let host = myServer;
@@ -210,33 +230,37 @@
               else if (host.includes('8080')) { protocol = 'ws:'; }
               
               const token = tokenInput.value.trim() || myToken;
-              if (!token) { loginError.innerText = "Invite token required"; loginBtn.disabled = false; return; }
+              if (!token) { screenLog("Missing token"); loginError.innerText = "Invite token required"; loginBtn.disabled = false; return; }
               const url = `${protocol}//${host}/ws?token=${token}`;
 
               if (isTauri && invoke) {
-                  screenLog("Invoking connect_server...");
+                  screenLog("Invoking Rust connect_server...");
                   try {
                       await invoke('connect_server', { url });
+                      screenLog("Rust connect call completed");
                       statusDot.className = 'status-dot connected';
                       if (myUsername) sendLogin(myUsername);
                   } catch (e) {
-                      screenLog("ERR: " + e);
+                      screenLog("Rust connection error: " + e);
                       loginError.innerText = "Connection failed: " + e;
                       loginBtn.disabled = false;
                   }
               } else {
-                  screenLog("Standard WebSocket...");
+                  screenLog("Standard WebSocket connection...");
                   ws = new WebSocket(url);
-                  ws.onopen = () => { statusDot.className = 'status-dot connected'; if (myUsername) sendLogin(myUsername); };
-                  ws.onclose = () => { statusDot.className = 'status-dot disconnected'; setTimeout(connect, 2000); };
+                  ws.onopen = () => { screenLog("WS Open"); statusDot.className = 'status-dot connected'; if (myUsername) sendLogin(myUsername); };
+                  ws.onclose = (e) => { screenLog("WS Closed: " + e.code); statusDot.className = 'status-dot disconnected'; setTimeout(connect, 2000); };
                   ws.onmessage = (event) => handleProtocolMsg(JSON.parse(event.data));
-                  ws.onerror = () => { loginError.innerText = "WS Error"; loginBtn.disabled = false; };
+                  ws.onerror = (e) => { screenLog("WS Error"); loginError.innerText = "Connection error"; loginBtn.disabled = false; };
               }
-          } catch (err) { screenLog("Fatal: " + err); loginBtn.disabled = false; }
+          } catch (err) { screenLog("Fatal connection error: " + err); loginBtn.disabled = false; }
         }
 
         if (isTauri && listen) {
-            listen('protocol-msg', (event) => handleProtocolMsg(event.payload)).then(() => {
+            listen('protocol-msg', (event) => {
+                screenLog("RX Protocol: " + event.payload.type);
+                handleProtocolMsg(event.payload);
+            }).then(() => {
                 screenLog("Stage 5: Listeners active");
                 invoke('client_ready');
             });
@@ -251,6 +275,8 @@
                     localStorage.setItem(TOKEN_KEY, myToken);
                     myNameDisplay.innerText = myUsername;
                     loginScreen.classList.add('hidden'); chatUI.classList.remove('hidden');
+                    screenLog("Identified as " + myUsername);
+                    await checkMediaCapabilities();
                     break;
                 case 'PeerList': peers = msg.payload.peers; renderPeers(); break;
                 case 'ChatMessage': if (msg.payload.channel === currentChannel) addMessage(msg); break;
@@ -265,8 +291,13 @@
         }
 
         async function sendCommand(msg) {
-            if (isTauri && invoke) { await invoke('send_protocol', { msg }); }
-            else if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify(msg)); }
+            screenLog("TX Command: " + msg.type);
+            try {
+                if (isTauri && invoke) { await invoke('send_protocol', { msg }); }
+                else if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify(msg)); }
+            } catch (e) {
+                screenLog("TX Error: " + e.message);
+            }
         }
 
         function switchChannel(name) {
@@ -294,21 +325,25 @@
         async function toggleVoice() { if (inVoice) stopVoice(); else await startVoice(); }
         async function startVoice() {
             try {
+                screenLog("Requesting Mic Access...");
                 localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                screenLog("Mic Access GRANTED");
                 inVoice = true; btnVoice.classList.add('active'); btnVoice.innerHTML = '<i class="fas fa-phone-slash"></i> Leave Voice';
                 peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => createPeerConnection(peer.id, true));
-            } catch (err) { screenLog("Mic Error: " + err); }
+            } catch (err) { screenLog("Mic Error: " + err.name + " - " + err.message); }
         }
         function stopVoice() { inVoice = false; btnVoice.classList.remove('active'); btnVoice.innerHTML = '<i class="fas fa-phone"></i> Join Voice'; if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; } cleanupDeadConnections(); }
         async function toggleScreen() { if (inScreen) stopScreen(); else await startScreen(); }
         async function startScreen() {
             try {
+                screenLog("Requesting Screen Capture...");
                 screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: { echoCancellation: false } });
+                screenLog("Screen Capture GRANTED");
                 inScreen = true; btnScreen.classList.add('active'); btnScreen.innerHTML = '<i class="fas fa-stop"></i> Stop Sharing'; videoGrid.classList.remove('hidden');
                 addVideoElement('me', screenStream, 'You (Sharing)'); sendCommand({ type: 'ScreenState', payload: { is_sharing: true, peer_id: myId } });
                 screenStream.getVideoTracks()[0].onended = () => stopScreen();
                 peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => createPeerConnection(peer.id, true));
-            } catch (err) { screenLog("Screen Error: " + err); }
+            } catch (err) { screenLog("Screen Error: " + err.name + " - " + err.message); }
         }
         function stopScreen() { inScreen = false; btnScreen.classList.remove('active'); btnScreen.innerHTML = '<i class="fas fa-desktop"></i> Share Screen'; if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; } removeVideoElement('me'); if (videoGrid.children.length === 0) videoGrid.classList.add('hidden'); sendCommand({ type: 'ScreenState', payload: { is_sharing: false, peer_id: myId } }); cleanupDeadConnections(); }
         function cleanupDeadConnections() { if (!inVoice && !inScreen && watchingPeers.size === 0) { Object.keys(peerConnections).forEach(id => { peerConnections[id].close(); delete peerConnections[id]; }); } }
@@ -351,7 +386,7 @@
           const user = usernameInput.value.trim();
           const server = serverInput.value.trim();
           const token = tokenInput.value.trim();
-          screenLog("Join Action Triggered");
+          screenLog("Join Initiated: " + user);
           if (!user || !server || !token) { loginError.innerText = "Missing fields"; return; }
           myUsername = user; myServer = server; myToken = token; loginError.innerText = ''; loginBtn.disabled = true;
           connect();
