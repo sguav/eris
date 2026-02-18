@@ -32,6 +32,7 @@ Eris is a self-contained hub that functions as both a WebRTC signaling server an
   cargo build
   cargo test
   ```
+- **Testing Documentation**: Detailed test coverage and manual procedures are documented in `docs/testing.md`.
 
 ## Development Conventions
 
