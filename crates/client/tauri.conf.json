@@ -18,7 +18,8 @@
     ],
     "security": {
       "csp": "default-src 'self' 'unsafe-inline' ws: wss: http: https: data: blob:"
-    }
+    },
+    "withGlobalTauri": true
   },
   "bundle": {
     "active": true,

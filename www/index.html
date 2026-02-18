@@ -291,9 +291,15 @@
 
   <script>
     // TAURI INTEGRATION
-    const isTauri = window.__TAURI_INTERNALS__ !== undefined;
-    const { invoke } = isTauri ? window.__TAURI__.core : { invoke: null };
-    const { listen } = isTauri ? window.__TAURI__.event : { listen: null };
+    const isTauri = !!window.__TAURI_INTERNALS__ || !!window.__TAURI__;
+    console.log("Environment: ", isTauri ? "Tauri" : "Browser");
+    
+    // Polyfill for non-tauri contexts
+    const tauriCore = isTauri ? (window.__TAURI__.core || window.__TAURI__.tauri) : { invoke: null };
+    const tauriEvent = isTauri ? window.__TAURI__.event : { listen: null };
+    
+    const { invoke } = tauriCore;
+    const { listen } = tauriEvent;
 
     const STORAGE_KEY = 'eris_username';
     const SERVER_KEY = 'eris_server';
@@ -345,50 +351,62 @@
     sidebarOverlay.onclick = () => { sidebar.classList.remove('open'); sidebarOverlay.classList.remove('open'); };
 
     async function connect() {
-      if (!myServer) return;
+      try {
+          console.log("Connect triggered. Server:", myServer, "Username:", myUsername);
+          if (!myServer) return;
 
-      let protocol = 'wss:';
-      let host = myServer;
+          console.log("Secure Context:", window.isSecureContext);
+          let protocol = 'wss:';
+          let host = myServer;
 
-      if (host.startsWith('https://')) {
-          protocol = 'wss:';
-          host = host.replace('https://', '');
-      } else if (host.startsWith('http://')) {
-          protocol = 'ws:';
-          host = host.replace('http://', '');
-      } else if (host.includes('8080')) {
-          protocol = 'ws:';
-      }
-      
-      const urlParams = new URLSearchParams(window.location.search);
-      const token = urlParams.get('token') || (isTauri ? localStorage.getItem('eris_token') : null) || prompt("Enter token:");
-      if (token) localStorage.setItem('eris_token', token);
-
-      const url = `${protocol}//${host}/ws?token=${token}`;
-
-      if (isTauri) {
-          try {
-              await invoke('connect_server', { url });
-              statusDot.className = 'status-dot connected';
-              if (myUsername) sendLogin(myUsername);
-          } catch (e) {
-              console.error("Tauri Connection Error:", e);
-              loginError.innerText = "Connection failed: " + e;
-              loginBtn.disabled = false;
-              loginScreen.classList.remove('hidden');
-              chatUI.classList.add('hidden');
+          if (host.startsWith('https://')) {
+              protocol = 'wss:';
+              host = host.replace('https://', '');
+          } else if (host.startsWith('http://')) {
+              protocol = 'ws:';
+              host = host.replace('http://', '');
+          } else if (host.includes('8080')) {
+              protocol = 'ws:';
           }
-      } else {
-          ws = new WebSocket(url);
-          ws.onopen = () => {
-            statusDot.className = 'status-dot connected';
-            if (myUsername) sendLogin(myUsername);
-          };
-          ws.onclose = () => {
-            statusDot.className = 'status-dot disconnected';
-            setTimeout(connect, 2000);
-          };
-          ws.onmessage = (event) => handleProtocolMsg(JSON.parse(event.data));
+          
+          const urlParams = new URLSearchParams(window.location.search);
+          const token = urlParams.get('token') || (isTauri ? localStorage.getItem('eris_token') : null) || prompt("Enter token:");
+          if (token) localStorage.setItem('eris_token', token);
+
+          const url = `${protocol}//${host}/ws?token=${token}`;
+
+          if (isTauri) {
+              console.log("Rust: Connecting to", url);
+              try {
+                  await invoke('connect_server', { url });
+                  statusDot.className = 'status-dot connected';
+                  if (myUsername) sendLogin(myUsername);
+              } catch (e) {
+                  console.error("Tauri Connection Error:", e);
+                  loginError.innerText = "Connection failed: " + e;
+                  loginBtn.disabled = false;
+              }
+          } else {
+              console.log("Browser: Connecting to", url);
+              ws = new WebSocket(url);
+              ws.onopen = () => {
+                statusDot.className = 'status-dot connected';
+                if (myUsername) sendLogin(myUsername);
+              };
+              ws.onclose = () => {
+                statusDot.className = 'status-dot disconnected';
+                setTimeout(connect, 2000);
+              };
+              ws.onmessage = (event) => handleProtocolMsg(JSON.parse(event.data));
+              ws.onerror = (e) => {
+                  console.error("WebSocket Error:", e);
+                  loginError.innerText = "WebSocket Error. Check console.";
+                  loginBtn.disabled = false;
+              };
+          }
+      } catch (err) {
+          console.error("Fatal Connect Error:", err);
+          loginBtn.disabled = false;
       }
     }
 
@@ -666,9 +684,13 @@
 
     loginForm.onsubmit = (e) => {
       e.preventDefault();
+      console.log("Form submitted");
       const user = usernameInput.value.trim();
       const server = serverInput.value.trim();
-      if (!user || !server) return;
+      if (!user || !server) {
+          loginError.innerText = "All fields required";
+          return;
+      }
       
       myUsername = user;
       myServer = server;
