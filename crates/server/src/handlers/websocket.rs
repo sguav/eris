@@ -8,8 +8,7 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
 use serde::Deserialize;
-
-use crate::protocol::Protocol;
+use eris_core::Protocol;
 use crate::state::{AppState, Peer};
 
 #[derive(Deserialize)]

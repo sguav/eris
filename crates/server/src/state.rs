@@ -2,7 +2,7 @@ use dashmap::DashMap;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
 use uuid::Uuid;
-use crate::protocol::{PeerInfo, Protocol};
+use eris_core::{PeerInfo, Protocol};
 
 pub struct Peer {
     pub username: String,

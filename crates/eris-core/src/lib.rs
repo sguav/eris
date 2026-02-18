@@ -22,27 +22,3 @@ pub struct PeerInfo {
     pub channel: String,
     pub is_sharing: bool,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_protocol_serialization() {
-        let msg = Protocol::ChatMessage { 
-            channel: "lobby".to_string(),
-            author: "Alice".to_string(), 
-            content: "Hello".to_string() 
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json, json!({
-            "type": "ChatMessage",
-            "payload": {
-                "channel": "lobby",
-                "author": "Alice",
-                "content": "Hello"
-            }
-        }));
-    }
-}

@@ -1,7 +1,6 @@
 //! ERIS UNIFIED CORE
 //! Purpose: Server Signaling + UI Web Server
 
-mod protocol;
 mod state;
 mod handlers;
 mod frontend;

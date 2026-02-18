@@ -3,4 +3,5 @@ resolver = "2"
 members = [
     "crates/server",
     "crates/client",
+    "crates/eris-core",
 ]

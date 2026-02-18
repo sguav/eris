@@ -21,6 +21,7 @@ local-ip-address = "0.6"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 uuid = { version = "1.8", features = ["v4", "serde"] }
+eris-core = { path = "../eris-core" }
 
 [dev-dependencies]
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }

@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -28,7 +29,6 @@
     }
     .hidden { display: none !important; }
     
-    /* Login Screen */
     #login-screen {
       flex: 1;
       display: flex;
@@ -46,7 +46,6 @@
       box-shadow: 0 10px 25px rgba(0,0,0,0.5);
     }
     
-    /* Main Layout */
     .container {
       flex: 1;
       display: flex;
@@ -55,7 +54,6 @@
       overflow: hidden;
     }
 
-    /* Sidebar (Responsive) */
     .sidebar {
         width: var(--sidebar-w);
         background: var(--card);
@@ -69,7 +67,6 @@
         z-index: 50;
     }
 
-    /* Main Content Area */
     .main-area {
         flex: 1;
         display: flex;
@@ -161,7 +158,6 @@
     }
     input:focus { border-color: var(--accent); }
     
-    /* Nav & Lists */
     .section-title { font-size: 0.7rem; text-transform: uppercase; color: var(--dim); letter-spacing: 1.5px; margin-bottom: 0.5rem; font-weight: 800; }
     .list-nav { list-style: none; padding: 0; margin: 0; }
     .nav-item {
@@ -205,7 +201,6 @@
     .btn-action.active { background: var(--success); border-color: var(--success); color: #000; font-weight: bold; }
     .btn-action i { width: 20px; text-align: center; margin-right: 8px; }
 
-    /* MOBILE ADJUSTMENTS */
     @media (max-width: 768px) {
         .mobile-menu-btn { display: block; }
         .sidebar {
@@ -295,6 +290,11 @@
   </div>
 
   <script>
+    // TAURI INTEGRATION
+    const isTauri = window.__TAURI_INTERNALS__ !== undefined;
+    const { invoke } = isTauri ? window.__TAURI__.core : { invoke: null };
+    const { listen } = isTauri ? window.__TAURI__.event : { listen: null };
+
     const STORAGE_KEY = 'eris_username';
     const SERVER_KEY = 'eris_server';
     
@@ -324,7 +324,7 @@
 
     let ws;
     let myUsername = localStorage.getItem(STORAGE_KEY) || '';
-    let myServer = localStorage.getItem(SERVER_KEY) || (window.location.host.includes('tauri') ? '' : window.location.host);
+    let myServer = localStorage.getItem(SERVER_KEY) || (isTauri ? '' : window.location.host);
     let myId = '';
     let currentChannel = 'lobby';
     let peers = [];
@@ -338,58 +338,62 @@
 
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
 
-    // Initial UI state
     serverInput.value = myServer;
     usernameInput.value = myUsername;
 
-    // MOBILE UI HANDLERS
     menuToggle.onclick = () => { sidebar.classList.add('open'); sidebarOverlay.classList.add('open'); };
     sidebarOverlay.onclick = () => { sidebar.classList.remove('open'); sidebarOverlay.classList.remove('open'); };
 
-    function connect() {
+    async function connect() {
       if (!myServer) return;
 
       let protocol = 'wss:';
       let host = myServer;
 
-      // If user provided a protocol, use it
       if (host.startsWith('https://')) {
           protocol = 'wss:';
           host = host.replace('https://', '');
       } else if (host.startsWith('http://')) {
           protocol = 'ws:';
           host = host.replace('http://', '');
-      } else {
-          // Default logic: use ws if port is 8080, otherwise wss
-          if (host.includes('8080')) {
-              protocol = 'ws:';
-          }
+      } else if (host.includes('8080')) {
+          protocol = 'ws:';
       }
       
       const urlParams = new URLSearchParams(window.location.search);
-      const token = urlParams.get('token') || prompt("Enter token:");
-      
-      console.log(`Connecting to ${protocol}//${host}/ws`);
-      try {
-          ws = new WebSocket(`${protocol}//${host}/ws?token=${token}`);
-      } catch (e) {
-          loginError.innerText = "Invalid server address";
-          loginBtn.disabled = false;
-          return;
+      const token = urlParams.get('token') || (isTauri ? localStorage.getItem('eris_token') : null) || prompt("Enter token:");
+      if (token) localStorage.setItem('eris_token', token);
+
+      const url = `${protocol}//${host}/ws?token=${token}`;
+
+      if (isTauri) {
+          try {
+              await invoke('connect_server', { url });
+              statusDot.className = 'status-dot connected';
+              if (myUsername) sendLogin(myUsername);
+          } catch (e) {
+              loginError.innerText = "Connection failed: " + e;
+              loginBtn.disabled = false;
+          }
+      } else {
+          ws = new WebSocket(url);
+          ws.onopen = () => {
+            statusDot.className = 'status-dot connected';
+            if (myUsername) sendLogin(myUsername);
+          };
+          ws.onclose = () => {
+            statusDot.className = 'status-dot disconnected';
+            setTimeout(connect, 2000);
+          };
+          ws.onmessage = (event) => handleProtocolMsg(JSON.parse(event.data));
       }
+    }
 
-      ws.onopen = () => {
-        statusDot.className = 'status-dot connected';
-        if (myUsername) sendLogin(myUsername);
-      };
+    if (isTauri) {
+        listen('protocol-msg', (event) => handleProtocolMsg(event.payload));
+    }
 
-      ws.onclose = () => {
-        statusDot.className = 'status-dot disconnected';
-        setTimeout(connect, 2000);
-      };
-
-      ws.onmessage = async (event) => {
-        const msg = JSON.parse(event.data);
+    async function handleProtocolMsg(msg) {
         switch (msg.type) {
             case 'Identify':
                 myId = msg.payload.id;
@@ -425,7 +429,14 @@
                 addMessage(msg);
                 break;
         }
-      };
+    }
+
+    async function sendCommand(msg) {
+        if (isTauri) {
+            await invoke('send_protocol', { msg });
+        } else if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(msg));
+        }
     }
 
     function switchChannel(name) {
@@ -440,7 +451,7 @@
             el.classList.toggle('active', el.innerText.toLowerCase().includes(name));
         });
 
-        ws.send(JSON.stringify({ type: 'JoinChannel', payload: { channel: name } }));
+        sendCommand({ type: 'JoinChannel', payload: { channel: name } });
         
         if (inScreen) stopScreen();
         watchingPeers.forEach(id => removeVideoElement(id));
@@ -478,7 +489,7 @@
     async function watchStream(targetId) {
         if (watchingPeers.has(targetId)) return;
         watchingPeers.add(targetId);
-        ws.send(JSON.stringify({ type: 'RequestStream', payload: { target_id: targetId } }));
+        sendCommand({ type: 'RequestStream', payload: { target_id: targetId } });
     }
 
     async function toggleVoice() {
@@ -521,7 +532,7 @@
             videoGrid.classList.remove('hidden');
             
             addVideoElement('me', screenStream, 'You (Sharing)');
-            ws.send(JSON.stringify({ type: 'ScreenState', payload: { is_sharing: true, peer_id: myId } }));
+            sendCommand({ type: 'ScreenState', payload: { is_sharing: true, peer_id: myId } });
 
             screenStream.getVideoTracks()[0].onended = () => stopScreen();
             peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => createPeerConnection(peer.id, true));
@@ -537,7 +548,7 @@
         if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
         removeVideoElement('me');
         if (videoGrid.children.length === 0) videoGrid.classList.add('hidden');
-        ws.send(JSON.stringify({ type: 'ScreenState', payload: { is_sharing: false, peer_id: myId } }));
+        sendCommand({ type: 'ScreenState', payload: { is_sharing: false, peer_id: myId } });
         cleanupDeadConnections();
     }
 
@@ -625,11 +636,11 @@
     }
 
     function sendSignal(targetId, data) {
-        ws.send(JSON.stringify({ type: 'Signal', payload: { target_id: targetId, data } }));
+        sendCommand({ type: 'Signal', payload: { target_id: targetId, data } });
     }
 
     function sendLogin(username) {
-        ws.send(JSON.stringify({ type: 'Login', payload: { username } }));
+        sendCommand({ type: 'Login', payload: { username } });
     }
 
     function addMessage(msg) {
@@ -663,12 +674,12 @@
     chatForm.onsubmit = (e) => {
       e.preventDefault();
       const content = chatInput.value.trim();
-      if (!content || !ws || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ type: 'ChatMessage', payload: { channel: currentChannel, author: myUsername, content } }));
+      if (!content) return;
+      sendCommand({ type: 'ChatMessage', payload: { channel: currentChannel, author: myUsername, content } });
       chatInput.value = '';
     };
 
-    const logout = () => { localStorage.removeItem(STORAGE_KEY); window.location.reload(); };
+    const logout = () => { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem('eris_token'); window.location.reload(); };
     btnLogout.onclick = logout;
     btnLogoutMobile.onclick = logout;
     btnVoice.onclick = toggleVoice;
