@@ -347,14 +347,31 @@
     sidebarOverlay.onclick = () => { sidebar.classList.remove('open'); sidebarOverlay.classList.remove('open'); };
 
     function connect() {
-      if (!myServer) return; // Wait for user input in native context
+      if (!myServer) return;
 
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      let protocol = 'wss:';
+      let host = myServer;
+
+      // If user provided a protocol, use it
+      if (host.startsWith('https://')) {
+          protocol = 'wss:';
+          host = host.replace('https://', '');
+      } else if (host.startsWith('http://')) {
+          protocol = 'ws:';
+          host = host.replace('http://', '');
+      } else {
+          // Default logic: use wss unless it's a known non-tls port or localhost on non-tls
+          if (window.location.protocol === 'http:' && !host.includes('8443')) {
+              protocol = 'ws:';
+          }
+      }
+      
       const urlParams = new URLSearchParams(window.location.search);
       const token = urlParams.get('token') || prompt("Enter token:");
       
+      console.log(`Connecting to ${protocol}//${host}/ws`);
       try {
-          ws = new WebSocket(`${protocol}//${myServer}/ws?token=${token}`);
+          ws = new WebSocket(`${protocol}//${host}/ws?token=${token}`);
       } catch (e) {
           loginError.innerText = "Invalid server address";
           loginBtn.disabled = false;
