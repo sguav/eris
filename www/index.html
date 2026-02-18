@@ -257,15 +257,17 @@
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
     function connect() {
-      // Use explicit IP if localhost to avoid Firefox IPv6 slowness in some setups
-      const host = window.location.hostname === 'localhost' ? '127.0.0.1:' + window.location.port : window.location.host;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host; // This naturally includes the port
       
       ws = new WebSocket(`${protocol}//${host}/ws`);
 
       ws.onopen = () => {
         statusDot.className = 'status-dot connected';
-        if (myUsername) sendLogin(myUsername);
+        if (myUsername) {
+            console.log("Auto-logging in as:", myUsername);
+            sendLogin(myUsername);
+        }
       };
 
       ws.onclose = () => {
