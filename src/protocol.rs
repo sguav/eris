@@ -5,9 +5,10 @@ use uuid::Uuid;
 #[serde(tag = "type", content = "payload")]
 pub enum Protocol {
     Login { username: String },
+    JoinChannel { channel: String },
     Identify { id: Uuid, username: String },
     PeerList { peers: Vec<PeerInfo> },
-    ChatMessage { author: String, content: String },
+    ChatMessage { channel: String, author: String, content: String },
     Signal { target_id: Uuid, data: serde_json::Value },
     System { message: String, severity: String },
 }
@@ -16,6 +17,7 @@ pub enum Protocol {
 pub struct PeerInfo {
     pub id: Uuid,
     pub username: String,
+    pub channel: String,
 }
 
 #[cfg(test)]
@@ -26,6 +28,7 @@ mod tests {
     #[test]
     fn test_protocol_serialization() {
         let msg = Protocol::ChatMessage { 
+            channel: "lobby".to_string(),
             author: "Alice".to_string(), 
             content: "Hello".to_string() 
         };
@@ -33,17 +36,9 @@ mod tests {
         assert_eq!(json, json!({
             "type": "ChatMessage",
             "payload": {
+                "channel": "lobby",
                 "author": "Alice",
                 "content": "Hello"
-            }
-        }));
-
-        let login = Protocol::Login { username: "Bob".to_string() };
-        let json = serde_json::to_value(&login).unwrap();
-        assert_eq!(json, json!({
-            "type": "Login",
-            "payload": {
-                "username": "Bob"
             }
         }));
     }

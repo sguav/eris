@@ -6,6 +6,7 @@ use crate::protocol::{PeerInfo, Protocol};
 
 pub struct Peer {
     pub username: String,
+    pub channel: String,
     pub tx: broadcast::Sender<Protocol>,
 }
 
@@ -30,6 +31,7 @@ impl AppState {
         let peers: Vec<PeerInfo> = self.peers.iter().map(|p| PeerInfo {
             id: *p.key(),
             username: p.username.clone(),
+            channel: p.channel.clone(),
         }).collect();
         let _ = self.broadcast_tx.send(Protocol::PeerList { peers });
     }
@@ -42,10 +44,11 @@ mod tests {
     #[test]
     fn test_history_buffer_limit() {
         let (tx, _) = broadcast::channel(10);
-        let state = AppState::new(tx);
+        let state = AppState::new(tx, "token".to_string());
 
         for i in 0..60 {
             let msg = Protocol::ChatMessage { 
+                channel: "lobby".to_string(),
                 author: "System".to_string(), 
                 content: format!("Msg {}", i) 
             };
@@ -66,11 +69,12 @@ mod tests {
     #[test]
     fn test_username_uniqueness_logic() {
         let (tx, _) = broadcast::channel(10);
-        let state = AppState::new(tx);
+        let state = AppState::new(tx, "token".to_string());
 
         let uid = Uuid::new_v4();
         state.peers.insert(uid, Peer {
             username: "Alice".to_string(),
+            channel: "lobby".to_string(),
             tx: broadcast::channel(1).0,
         });
 
