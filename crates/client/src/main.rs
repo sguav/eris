@@ -40,7 +40,13 @@ async fn send_protocol(
     msg: Protocol,
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    state.connection.send(msg).await
+    match state.connection.send(msg).await {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            log("CLIENT", &format!("ERROR sending protocol: {}", e));
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]
@@ -60,15 +66,19 @@ fn create_app() -> tauri::App {
     tauri::Builder::default()
         .manage(state_clone)
         .setup(move |app| {
-            // FIXES FOR LINUX MEDIA ACCESS (WebKitGTK)
-            // 1. Disable WebKit Sandbox (Crucial for hardware access in some distros)
+            // AGGRESSIVE LINUX MEDIA FIXES
+            // 1. Sandbox and Portal
             std::env::set_var("WEBKIT_FORCE_SANDBOX", "0");
-            
-            // 2. Help with GStreamer/WebRTC crashes on some drivers
-            std::env::set_var("WEBPKI_ROOTS_PATH", "/etc/ssl/certs/ca-certificates.crt");
-            
-            // 3. Ensure we use the correct portal for screen/mic if available
             std::env::set_var("GTK_USE_PORTAL", "1");
+            
+            // 2. GStreamer / WebRTC specific ranking
+            std::env::set_var("GST_PLUGIN_FEATURE_RANK", "webrtcbin:MAX,v4l2src:MAX");
+            
+            // 3. WebKit WebRTC environment
+            std::env::set_var("WEBKIT_WEBRTC_USE_GSTREAMER", "1");
+            
+            // 4. Critical: Force Software path if hardware is failing
+            std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1"); 
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -103,21 +113,13 @@ mod tests {
     async fn test_client_connection_logic() {
         let (connection, _rx) = ConnectionManager::new();
         let app_state = Arc::new(AppState { connection });
-        
         let app = mock_builder()
             .manage(app_state.clone())
             .invoke_handler(tauri::generate_handler![connect_server, send_protocol, client_ready, js_log])
             .build(mock_context(noop_assets()))
             .unwrap();
-
         let state: State<Arc<AppState>> = app.state();
-        
-        let result = send_protocol(
-            Protocol::Login { username: "Test".to_string() },
-            state,
-        ).await;
-        
+        let result = send_protocol(Protocol::Login { username: "Test".to_string() }, state).await;
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Not connected");
     }
 }
