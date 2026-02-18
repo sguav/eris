@@ -5,7 +5,7 @@ mod connection;
 
 use std::sync::Arc;
 use tauri::{State, Emitter};
-use eris_core::Protocol;
+use eris_core::{Protocol, log};
 use connection::ConnectionManager;
 
 struct AppState {
@@ -17,14 +17,14 @@ async fn connect_server(
     url: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    println!("Rust: Connecting to {}", url);
+    log("CLIENT", &format!("Attempting to connect to: {}", url));
     match state.connection.connect(url.clone()).await {
         Ok(_) => {
-            println!("Rust: Connected successfully to {}", url);
+            log("CLIENT", &format!("Connection established: {}", url));
             Ok(())
         },
         Err(e) => {
-            eprintln!("Rust: Connection failed: {}", e);
+            log("CLIENT", &format!("ERROR: Connection failed: {}", e));
             Err(e)
         }
     }
@@ -42,6 +42,7 @@ async fn send_protocol(
 async fn client_ready(
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
+    log("CLIENT", "Frontend reported READY. Flushing buffers.");
     state.connection.set_ready().await;
     Ok(())
 }
@@ -69,6 +70,7 @@ fn create_app() -> tauri::App {
 }
 
 fn main() {
+    log("CLIENT", "Starting Eris Native Client...");
     create_app().run(|_app_handle, _event| {});
 }
 
@@ -94,7 +96,6 @@ mod tests {
             .build(mock_context(noop_assets()))
             .unwrap();
 
-        // Access state through the app handle
         let state: State<Arc<AppState>> = app.state();
         
         let result = send_protocol(

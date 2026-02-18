@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::protocol::Message, Connector};
-use eris_core::Protocol;
+use eris_core::{Protocol, log};
 use rustls::client::danger::{ServerCertVerifier, ServerCertVerified};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 
@@ -54,6 +54,8 @@ impl ConnectionManager {
     }
 
     pub async fn connect(&self, url: String) -> Result<(), String> {
+        log("CLIENT", &format!("Handshaking with WebSocket: {}", url));
+        
         let root_store = rustls::RootCertStore::empty();
         let mut config = rustls::ClientConfig::builder()
             .with_root_certificates(root_store)
@@ -73,17 +75,28 @@ impl ConnectionManager {
         
         tokio::spawn(async move {
             while let Some(msg_res) = stream.next().await {
-                if let Ok(Message::Text(text)) = msg_res {
-                    if let Ok(protocol_msg) = serde_json::from_str::<Protocol>(&text) {
-                        let ready = is_ready.lock().await;
-                        if *ready {
-                            let _ = tx.send(protocol_msg);
-                        } else {
-                            buffer.lock().await.push(protocol_msg);
+                match msg_res {
+                    Ok(Message::Text(text)) => {
+                        if let Ok(protocol_msg) = serde_json::from_str::<Protocol>(&text) {
+                            let ready = is_ready.lock().await;
+                            if *ready {
+                                let _ = tx.send(protocol_msg);
+                            } else {
+                                log("CLIENT", "Buffering incoming message (frontend not ready)");
+                                buffer.lock().await.push(protocol_msg);
+                            }
                         }
+                    }
+                    Ok(other) => {
+                        log("CLIENT", &format!("Received non-text WS message: {:?}", other));
+                    }
+                    Err(e) => {
+                        log("CLIENT", &format!("ERROR in WS receive loop: {}", e));
+                        break;
                     }
                 }
             }
+            log("CLIENT", "WS receive loop terminated");
         });
 
         Ok(())

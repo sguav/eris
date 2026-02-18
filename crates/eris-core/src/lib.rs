@@ -32,6 +32,11 @@ pub struct PeerInfo {
     pub is_sharing: bool,
 }
 
+pub fn log(component: &str, message: &str) {
+    let now = chrono::Local::now();
+    println!("[{}] [{}] {}", now.format("%Y-%m-%d %H:%M:%S"), component, message);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

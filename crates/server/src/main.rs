@@ -18,15 +18,18 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use std::path::Path;
 use rand::{distributions::Alphanumeric, Rng};
+use eris_core::log;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
+    log("SERVER", "Initializing Eris Unified Hub...");
+
     // Ensure certificates exist for HTTPS
     let (cert_path, key_path) = ("cert.pem", "key.pem");
     if !Path::new(cert_path).exists() || !Path::new(key_path).exists() {
-        println!("Generating self-signed certificate...");
+        log("SERVER", "Generating self-signed certificate...");
         generate_self_signed_cert(cert_path, key_path).expect("Failed to generate certs");
     }
 
@@ -51,33 +54,27 @@ async fn main() {
 
     // --- Dual Port Listeners ---
     
-    // 1. Plain HTTP/WS (8080) - Ideal for native clients bypassing self-signed cert issues
+    // 1. Plain HTTP/WS (8080)
     let addr_plain = "0.0.0.0:8080";
     let listener_plain = tokio::net::TcpListener::bind(addr_plain).await.unwrap();
     let app_plain = app.clone();
     tokio::spawn(async move {
+        log("SERVER", "Plain HTTP/WS listener started on port 8080");
         axum::serve(listener_plain, app_plain).await.unwrap();
     });
 
-    // 2. Secure HTTPS/WSS (8443) - Required for browser Secure Context (Mic/Screen Share)
+    // 2. Secure HTTPS/WSS (8443)
     let addr_secure = "0.0.0.0:8443";
     let socket_secure: std::net::SocketAddr = addr_secure.parse().unwrap();
     
     let local_ip = local_ip_address::local_ip().map(|ip| ip.to_string()).unwrap_or_else(|_| "localhost".to_string());
     let invite_url = format!("https://{}:8443/?token={}", local_ip, invite_token);
 
-    println!("--------------------------------------------------");
-    println!("🌑 ERIS UNIFIED CORE ONLINE");
-    println!("🌍 Web UI (Secure): https://localhost:8443");
-    println!("🌍 Web UI (Plain):  http://localhost:8080");
-    println!("📡 Signaling (Secure): wss://localhost:8443/ws");
-    println!("📡 Signaling (Plain):  ws://localhost:8080/ws");
-    println!("🔑 Invite Token: {}", invite_token);
-    println!("🔗 Invite URL: {}", invite_url);
-    println!("--------------------------------------------------");
+    log("SERVER", &format!("Invite Token: {}", invite_token));
+    log("SERVER", &format!("Invite URL: {}", invite_url));
     qr2term::print_qr(&invite_url).ok();
-    println!("--------------------------------------------------");
     
+    log("SERVER", "Secure HTTPS/WSS listener starting on port 8443...");
     axum_server::bind_rustls(socket_secure, config)
         .serve(app.into_make_service())
         .await

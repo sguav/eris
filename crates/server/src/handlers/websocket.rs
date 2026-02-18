@@ -8,7 +8,8 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
 use serde::Deserialize;
-use eris_core::Protocol;
+
+use eris_core::{Protocol, log};
 use crate::state::{AppState, Peer};
 
 #[derive(Deserialize)]
@@ -27,6 +28,7 @@ pub async fn ws_handler(
         }
     }
     
+    log("SERVER", "Unauthorized connection attempt rejected (invalid/missing token)");
     axum::http::Response::builder()
         .status(axum::http::StatusCode::UNAUTHORIZED)
         .body(axum::body::Body::empty())
@@ -60,6 +62,8 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             }
 
             my_username = name.to_string();
+            log("SERVER", &format!("Peer '{}' ({}) logged in", my_username, my_id));
+            
             state.peers.insert(my_id, Peer { 
                 username: my_username.clone(), 
                 channel: "lobby".to_string(),
@@ -70,7 +74,6 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             let ident = Protocol::Identify { id: my_id, username: my_username.clone() };
             if let Ok(msg_json) = serde_json::to_string(&ident) { let _ = sender.send(Message::Text(msg_json)).await; }
             
-            // Send history for the current channel
             let history_snapshot = {
                 let history = state.history.lock().unwrap();
                 history.clone()
@@ -127,6 +130,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             if let Ok(protocol_msg) = serde_json::from_str::<Protocol>(&text) {
                 match protocol_msg {
                     Protocol::JoinChannel { channel } => {
+                        log("SERVER", &format!("Peer '{}' moving to channel: {}", my_username_clone, channel));
                         {
                             let mut current = my_channel_recv.write().await;
                             *current = channel.clone();
@@ -182,6 +186,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         _ = (&mut recv_task) => send_task.abort(),
     };
 
+    log("SERVER", &format!("Peer '{}' ({}) disconnected", my_username, my_id));
     state.peers.remove(&my_id);
     state.broadcast_peer_list();
 }
