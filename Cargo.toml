@@ -2,5 +2,5 @@
 resolver = "2"
 members = [
     "crates/server",
+    "crates/client",
 ]
-# "crates/client" temporarily disabled until native dependencies are resolved
