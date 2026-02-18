@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// The core signaling protocol for Eris.
+///
+/// # Examples
+/// ```
+/// use eris_core::Protocol;
+/// let msg = Protocol::System { message: "test".into(), severity: "info".into() };
+/// let json = serde_json::to_string(&msg).unwrap();
+/// assert!(json.contains("test"));
+/// ```
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(tag = "type", content = "payload")]
 pub enum Protocol {
