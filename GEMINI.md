@@ -13,6 +13,7 @@ Eris is a self-contained hub that functions as both a WebRTC signaling server an
     - **Port 8443**: Secure HTTPS/WSS for browsers requiring Secure Context.
 - **Message Buffering**: The client Rust backend must buffer incoming protocol messages until the frontend signals it is `ready` to prevent race conditions during initialization.
 - **Strict Quality**: Zero warning policy. All workspace tests must pass strictly before any feature commit.
+- **Local Development Resilience**: The native client includes logic to bypass TLS certificate validation when connecting to `localhost` or local network addresses, enabling the use of self-signed certificates without external trust anchors.
 
 ## Project Overview
 
