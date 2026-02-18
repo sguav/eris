@@ -41,6 +41,7 @@ struct Peer {
 struct AppState {
     peers: DashMap<Uuid, Peer>,
     broadcast_tx: broadcast::Sender<Protocol>,
+    history: std::sync::Mutex<Vec<Protocol>>,
 }
 
 #[tokio::main]
@@ -51,6 +52,7 @@ async fn main() {
     let state = Arc::new(AppState {
         peers: DashMap::new(),
         broadcast_tx,
+        history: std::sync::Mutex::new(Vec::new()),
     });
 
     let app = Router::new()
@@ -118,6 +120,18 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                 let _ = sender.send(Message::Text(msg_json)).await;
             }
             
+            // Send history
+            let history_snapshot = {
+                let history = state.history.lock().unwrap();
+                history.clone()
+            };
+            
+            for msg in history_snapshot {
+                if let Ok(txt) = serde_json::to_string(&msg) {
+                    if sender.send(Message::Text(txt)).await.is_err() { break; }
+                }
+            }
+            
             let _ = state.broadcast_tx.send(Protocol::System { 
                 message: format!("{} joined", my_username), 
                 severity: "info".to_string() 
@@ -155,10 +169,19 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             if let Ok(protocol_msg) = serde_json::from_str::<Protocol>(&text) {
                 match protocol_msg {
                     Protocol::ChatMessage { content, .. } => {
-                        let _ = state_clone.broadcast_tx.send(Protocol::ChatMessage { 
+                        let msg = Protocol::ChatMessage { 
                             author: my_username_clone.clone(), 
                             content 
-                        });
+                        };
+                        
+                        // Save to history
+                        {
+                            let mut history = state_clone.history.lock().unwrap();
+                            history.push(msg.clone());
+                            if history.len() > 50 { history.remove(0); }
+                        }
+
+                        let _ = state_clone.broadcast_tx.send(msg);
                     }
                     Protocol::Signal { target_id, data } => {
                         if let Some(target) = state_clone.peers.get(&target_id) {
