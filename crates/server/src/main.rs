@@ -48,26 +48,38 @@ async fn main() {
         .route("/", get(|| async { Html(INDEX_HTML) }))
         .route("/ws", get(ws_handler))
         .layer(tower_http::cors::CorsLayer::permissive())
-        .with_state(state);
+        .with_state(state.clone());
 
-    let addr = "0.0.0.0:8443";
-    let socket_addr: std::net::SocketAddr = addr.parse().unwrap();
+    // --- Dual Port Listeners ---
     
-    // Attempt to get local IP for the QR code
+    // 1. Plain HTTP/WS (8080) - Ideal for native clients bypassing self-signed cert issues
+    let addr_plain = "0.0.0.0:8080";
+    let listener_plain = tokio::net::TcpListener::bind(addr_plain).await.unwrap();
+    let app_plain = app.clone();
+    tokio::spawn(async move {
+        axum::serve(listener_plain, app_plain).await.unwrap();
+    });
+
+    // 2. Secure HTTPS/WSS (8443) - Required for browser Secure Context (Mic/Screen Share)
+    let addr_secure = "0.0.0.0:8443";
+    let socket_secure: std::net::SocketAddr = addr_secure.parse().unwrap();
+    
     let local_ip = local_ip_address::local_ip().map(|ip| ip.to_string()).unwrap_or_else(|_| "localhost".to_string());
     let invite_url = format!("https://{}:8443/?token={}", local_ip, invite_token);
 
     println!("--------------------------------------------------");
-    println!("🌑 ERIS UNIFIED CORE ONLINE (HTTPS)");
-    println!("🌍 Web UI: https://localhost:8443");
-    println!("📡 Signaling: wss://localhost:8443/ws");
+    println!("🌑 ERIS UNIFIED CORE ONLINE");
+    println!("🌍 Web UI (Secure): https://localhost:8443");
+    println!("🌍 Web UI (Plain):  http://localhost:8080");
+    println!("📡 Signaling (Secure): wss://localhost:8443/ws");
+    println!("📡 Signaling (Plain):  ws://localhost:8080/ws");
     println!("🔑 Invite Token: {}", invite_token);
     println!("🔗 Invite URL: {}", invite_url);
     println!("--------------------------------------------------");
     qr2term::print_qr(&invite_url).ok();
     println!("--------------------------------------------------");
     
-    axum_server::bind_rustls(socket_addr, config)
+    axum_server::bind_rustls(socket_secure, config)
         .serve(app.into_make_service())
         .await
         .unwrap();
@@ -127,7 +139,7 @@ mod tests {
         
         // Alice should eventually see Bob join
         let mut bob_joined = false;
-        for _ in 0..5 { // Check a few messages
+        for _ in 0..5 {
             let msg = ws_a.next().await.unwrap().unwrap();
             let text = msg.to_text().unwrap();
             if text.contains("Bob joined lobby") {

@@ -8,6 +8,9 @@ Eris is a self-contained hub that functions as both a WebRTC signaling server an
 - **Multi-Client Support**: The frontend in `www/` must remain compatible with both browser and native (Tauri) contexts.
 - **Documentation Parity**: Every architectural change must be accompanied by a dedicated commit that updates `GEMINI.md`.
 - **Security First**: Features requiring hardware access (mic/camera) must be served over HTTPS/WSS to ensure a Secure Context.
+- **Dual Port Support**: 
+    - **Port 8080**: Plain HTTP/WS for native clients bypassing TLS certificate issues.
+    - **Port 8443**: Secure HTTPS/WSS for browsers requiring Secure Context.
 - **Multi-Channel**: The system supports multiple logical channels. Messages, peer lists, and voice signaling are isolated by the current channel of the user.
 - **Screen Sharing**: Users can share their screen within a channel. Watching a shared stream is optional.
 
