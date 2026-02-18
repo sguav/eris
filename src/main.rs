@@ -4,17 +4,19 @@
 mod protocol;
 mod state;
 mod handlers;
+mod frontend;
 
 use axum::{
     routing::get,
+    response::Html,
     Router,
 };
 use axum_server::tls_rustls::RustlsConfig;
 use handlers::websocket::ws_handler;
 use state::AppState;
+use frontend::INDEX_HTML;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tower_http::services::ServeDir;
 use std::path::Path;
 
 #[tokio::main]
@@ -36,8 +38,8 @@ async fn main() {
     let state = Arc::new(AppState::new(broadcast_tx));
 
     let app = Router::new()
+        .route("/", get(|| async { Html(INDEX_HTML) }))
         .route("/ws", get(ws_handler))
-        .fallback_service(ServeDir::new("./www"))
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state);
 

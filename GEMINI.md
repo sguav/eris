@@ -14,8 +14,12 @@ Eris is a self-contained hub that functions as both a WebRTC signaling server an
 - **Primary Technologies**:
     - **Backend**: Rust, Axum, Axum-server (TLS), rcgen (Self-signed certs).
     - **Architecture**: Modular design with separate `protocol`, `state`, and `handlers`.
-    - **Frontend**: Vanilla JS (React-free for standalone simplicity), served via `ServeDir`.
+    - **Frontend**: Vanilla JS (React-free for standalone simplicity), embedded into the binary using `include_str!`.
 - **Security**: Serves over HTTPS by default (port 8443) using automatically generated self-signed certificates.
+
+## Architecture & Standalone Nature
+
+- **Binary Embedding**: The frontend `www/index.html` is baked into the executable at compile time. This allows the application to run as a single standalone file without external dependencies.
 
 ## Building and Running
 
