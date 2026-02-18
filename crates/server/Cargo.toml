@@ -1,0 +1,28 @@
+[package]
+name = "eris"
+version = "0.1.0"
+edition = "2021"
+authors = ["Eris Project"]
+description = "Self-contained Eris Hub: Signaling + Web Server"
+
+[dependencies]
+axum = { version = "0.7.5", features = ["ws"] }
+tokio = { version = "1.37", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+futures-util = "0.3"
+dashmap = "5.5"
+tower-http = { version = "0.5.2", features = ["cors"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+rcgen = "0.13"
+qr2term = "0.3"
+rand = "0.8"
+local-ip-address = "0.6"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+uuid = { version = "1.8", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+rustls = "0.23"
+rustls-pki-types = "1.0"
