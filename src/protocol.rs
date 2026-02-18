@@ -9,7 +9,7 @@ pub enum Protocol {
     Identify { id: Uuid, username: String },
     PeerList { peers: Vec<PeerInfo> },
     ChatMessage { channel: String, author: String, content: String },
-    ScreenState { is_sharing: bool },
+    ScreenState { peer_id: Uuid, is_sharing: bool },
     RequestStream { target_id: Uuid },
     Signal { target_id: Uuid, data: serde_json::Value },
     System { message: String, severity: String },

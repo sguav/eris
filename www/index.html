@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -348,6 +349,14 @@
             case 'ChatMessage':
                 if (msg.payload.channel === currentChannel) addMessage(msg);
                 break;
+            case 'ScreenState':
+                if (!msg.payload.is_sharing) {
+                    removeVideoElement(msg.payload.peer_id);
+                    watchingPeers.delete(msg.payload.peer_id);
+                    if (videoGrid.children.length === 0) videoGrid.classList.add('hidden');
+                }
+                renderPeers();
+                break;
             case 'Signal':
                 handleSignal(msg.payload.target_id, msg.payload.data);
                 break;
@@ -375,9 +384,9 @@
         ws.send(JSON.stringify({ type: 'JoinChannel', payload: { channel: name } }));
         
         if (inScreen) stopScreen();
+        watchingPeers.forEach(id => removeVideoElement(id));
         watchingPeers.clear();
-        videoGrid.innerHTML = '';
-        videoGrid.classList.add('hidden');
+        if (videoGrid.children.length === 0) videoGrid.classList.add('hidden');
 
         if (name === 'voice') {
             startVoice();
@@ -448,7 +457,7 @@
             videoGrid.classList.remove('hidden');
             
             addVideoElement('me', screenStream, 'You (Sharing)');
-            ws.send(JSON.stringify({ type: 'ScreenState', payload: { is_sharing: true } }));
+            ws.send(JSON.stringify({ type: 'ScreenState', payload: { is_sharing: true, peer_id: myId } }));
 
             screenStream.getVideoTracks()[0].onended = () => stopScreen();
         } catch (err) {
@@ -463,7 +472,7 @@
         if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
         removeVideoElement('me');
         if (videoGrid.children.length === 0) videoGrid.classList.add('hidden');
-        ws.send(JSON.stringify({ type: 'ScreenState', payload: { is_sharing: false } }));
+        ws.send(JSON.stringify({ type: 'ScreenState', payload: { is_sharing: false, peer_id: myId } }));
         cleanupDeadConnections();
     }
 
@@ -477,7 +486,15 @@
     }
 
     function createPeerConnection(targetId, isOfferor) {
-        if (peerConnections[targetId]) return peerConnections[targetId];
+        if (peerConnections[targetId]) {
+            // If already exists, add new tracks if any
+            if (screenStream) screenStream.getTracks().forEach(t => {
+                if (!peerConnections[targetId].getSenders().find(s => s.track === t)) {
+                    peerConnections[targetId].addTrack(t, screenStream);
+                }
+            });
+            return peerConnections[targetId];
+        }
         
         const pc = new RTCPeerConnection(rtcConfig);
         peerConnections[targetId] = pc;
@@ -494,6 +511,7 @@
                 const peer = peers.find(p => p.id === targetId);
                 addVideoElement(targetId, stream, peer ? peer.username : 'Peer');
             } else {
+                // Audio track (could be mic or screen audio)
                 const audio = new Audio();
                 audio.srcObject = stream;
                 audio.play();
@@ -572,7 +590,6 @@
       const user = usernameInput.value.trim();
       if (!user) return;
       myUsername = user;
-      loginError.innerText = '';
       loginBtn.disabled = true;
       if (ws.readyState === WebSocket.OPEN) sendLogin(user);
     };

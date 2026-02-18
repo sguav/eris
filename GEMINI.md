@@ -9,7 +9,7 @@ Eris is a self-contained hub that functions as both a WebRTC signaling server an
 - **Security First**: Features requiring hardware access (mic/camera) must be served over HTTPS to ensure a Secure Context.
 - **Invite Token**: Access to the WebSocket signaling is protected by a server-generated random token.
 - **Multi-Channel**: The system supports multiple logical channels. Messages, peer lists, and voice signaling are isolated by the current channel of the user.
-- **Screen Sharing**: Users can share their screen within a channel. Signaling and streams are isolated per channel. Watching a shared stream is optional for receivers.
+- **Screen Sharing**: Users can share their screen within a channel. Signaling and streams are isolated per channel. Watching a shared stream is optional. Streams automatically synchronize cleanup across peers.
 
 ## Project Overview
 

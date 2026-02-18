@@ -160,11 +160,11 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                             let _ = target.tx.send(Protocol::Signal { target_id: my_id, data });
                         }
                     }
-                    Protocol::ScreenState { is_sharing } => {
+                    Protocol::ScreenState { is_sharing, .. } => {
                         if let Some(mut p) = state_clone.peers.get_mut(&my_id) {
                             p.is_sharing = is_sharing;
                         }
-                        let _ = state_clone.broadcast_tx.send(Protocol::ScreenState { is_sharing });
+                        let _ = state_clone.broadcast_tx.send(Protocol::ScreenState { peer_id: my_id, is_sharing });
                         state_clone.broadcast_peer_list();
                     }
                     Protocol::RequestStream { target_id } => {
