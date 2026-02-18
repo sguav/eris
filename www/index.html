@@ -127,7 +127,7 @@
         let invoke = null;
         let listen = null;
 
-        if (isTauri) {
+        if (isTauri && window.__TAURI__) {
             try {
                 const t = window.__TAURI__;
                 invoke = t.core?.invoke || t.tauri?.invoke || t.invoke;
