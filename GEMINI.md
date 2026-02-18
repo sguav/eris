@@ -9,6 +9,7 @@ Eris is a self-contained hub that functions as both a WebRTC signaling server an
 - **Security First**: Features requiring hardware access (mic/camera) must be served over HTTPS to ensure a Secure Context.
 - **Invite Token**: Access to the WebSocket signaling is protected by a server-generated random token.
 - **Multi-Channel**: The system supports multiple logical channels. Messages, peer lists, and voice signaling are isolated by the current channel of the user.
+- **Screen Sharing**: Users can share their screen within a channel. Signaling and streams are isolated per channel.
 
 ## Project Overview
 
@@ -16,7 +17,7 @@ Eris is a self-contained hub that functions as both a WebRTC signaling server an
 - **Primary Technologies**:
     - **Backend**: Rust, Axum, Axum-server (TLS), rcgen (Self-signed certs).
     - **Architecture**: Modular design with separate `protocol`, `state`, and `handlers`.
-    - **Frontend**: Vanilla JS (React-free for standalone simplicity), embedded into the binary using `include_str!`.
+    - **Capabilities**: Real-time text chat, P2P voice channels, and P2P screen sharing.
 - **Security**: Serves over HTTPS by default (port 8443) using automatically generated self-signed certificates.
 
 ## Architecture & Standalone Nature

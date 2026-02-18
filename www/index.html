@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -46,7 +47,7 @@
     
     /* Main UI */
     .container {
-      max-width: 1200px;
+      max-width: 1400px;
       margin: 0 auto;
       width: 100%;
       display: flex;
@@ -60,6 +61,7 @@
         flex: 1;
         display: flex;
         flex-direction: column;
+        min-width: 0; /* Fix flexbox overflow */
     }
     .sidebar {
         width: 250px;
@@ -69,6 +71,7 @@
         display: flex;
         flex-direction: column;
         gap: 1.5rem;
+        flex-shrink: 0;
     }
     header {
       background: var(--card);
@@ -89,6 +92,30 @@
     .connected { background: var(--success); }
     .disconnected { background: var(--error); }
     
+    #video-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+    .video-container {
+        background: black;
+        border-radius: 8px;
+        overflow: hidden;
+        aspect-ratio: 16/9;
+        position: relative;
+    }
+    video { width: 100%; height: 100%; object-fit: contain; }
+    .video-label {
+        position: absolute;
+        bottom: 8px;
+        left: 8px;
+        background: rgba(0,0,0,0.6);
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+    }
+
     #messages {
       flex: 1;
       background: rgba(255,255,255,0.02);
@@ -151,7 +178,6 @@
         font-size: 0.8rem;
     }
 
-    /* Channels & Peers */
     .section-title { font-size: 0.75rem; text-transform: uppercase; color: var(--dim); letter-spacing: 1px; margin-bottom: 0.5rem; }
     .list-nav { list-style: none; padding: 0; margin: 0; }
     .nav-item {
@@ -166,13 +192,18 @@
     .nav-item:hover { background: rgba(255,255,255,0.05); }
     .nav-item.active { background: rgba(59, 130, 246, 0.1); color: var(--accent); }
     
-    #voice-controls {
+    #controls-area {
         margin-top: auto;
         padding-top: 1rem;
         border-top: 1px solid #27272a;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
     }
-    .btn-voice { background: #18181b; border: 1px solid #27272a; width: 100%; }
-    .btn-voice.active { background: var(--success); border-color: var(--success); }
+    .btn-action { background: #18181b; border: 1px solid #27272a; width: 100%; text-align: left; padding: 0.6rem 0.8rem; font-size: 0.9rem; border-radius: 4px; color: var(--text); cursor: pointer; }
+    .btn-action:hover { background: rgba(255,255,255,0.05); }
+    .btn-action.active { background: var(--success); border-color: var(--success); }
+    .btn-action i { width: 20px; text-align: center; margin-right: 5px; }
   </style>
 </head>
 <body>
@@ -204,15 +235,16 @@
             <ul id="peer-list" class="list-nav"></ul>
         </div>
         
-        <div id="voice-controls">
-            <button id="btn-voice" class="btn-voice">Join Voice</button>
+        <div id="controls-area">
+            <button id="btn-voice" class="btn-action"><i class="fas fa-phone"></i> Join Voice</button>
+            <button id="btn-screen" class="btn-action"><i class="fas fa-desktop"></i> Share Screen</button>
         </div>
     </div>
 
     <div class="main-area">
         <header>
           <div style="display: flex; align-items: center; gap: 10px;">
-            <h1 id="current-channel-name" style="margin:0; font-size: 1.1rem;"># lobby</h1>
+            <h1 id="current-channel-name" style="margin:0; font-size: 1.1rem;"><i class="fas fa-hashtag"></i> lobby</h1>
             <span id="status-dot" class="status-dot disconnected"></span>
           </div>
           <div style="display: flex; align-items: center; gap: 1rem;">
@@ -221,6 +253,7 @@
           </div>
         </header>
 
+        <div id="video-grid" class="hidden"></div>
         <div id="messages"></div>
 
         <form id="chat-form">
@@ -248,6 +281,8 @@
     const channelListEl = document.getElementById('channel-list');
     const currentChannelNameEl = document.getElementById('current-channel-name');
     const btnVoice = document.getElementById('btn-voice');
+    const btnScreen = document.getElementById('btn-screen');
+    const videoGrid = document.getElementById('video-grid');
 
     let ws;
     let myUsername = localStorage.getItem(STORAGE_KEY) || '';
@@ -256,8 +291,10 @@
     let peers = [];
     
     let localStream = null;
-    let peerConnections = {};
+    let screenStream = null;
+    let peerConnections = {}; // targetId -> RTCPeerConnection
     let inVoice = false;
+    let inScreen = false;
 
     const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -318,13 +355,12 @@
 
         ws.send(JSON.stringify({ type: 'JoinChannel', payload: { channel: name } }));
         
-        // Auto-join voice logic
+        if (inScreen) stopScreen();
         if (name === 'voice') {
             startVoice();
         } else if (previousChannel === 'voice' && inVoice) {
             stopVoice();
         } else if (inVoice) {
-            // Re-establish voice mesh for the new channel
             stopVoice();
             startVoice();
         }
@@ -364,26 +400,88 @@
         btnVoice.classList.remove('active');
         btnVoice.innerText = 'Join Voice';
         if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-        Object.keys(peerConnections).forEach(id => { peerConnections[id].close(); delete peerConnections[id]; });
+        cleanupDeadConnections();
+    }
+
+    async function toggleScreen() {
+        if (inScreen) stopScreen(); else await startScreen();
+    }
+
+    async function startScreen() {
+        try {
+            screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+            inScreen = true;
+            btnScreen.classList.add('active');
+            btnScreen.innerText = 'Stop Sharing';
+            videoGrid.classList.remove('hidden');
+            
+            // Add self video
+            addVideoElement('me', screenStream, 'You (Sharing)');
+
+            // Handle stop from browser UI
+            screenStream.getVideoTracks()[0].onended = () => stopScreen();
+
+            // Re-negotiate all connections with video
+            peers.filter(p => p.id !== myId && p.channel === currentChannel).forEach(peer => {
+                const pc = createPeerConnection(peer.id, true);
+                screenStream.getTracks().forEach(track => pc.addTrack(track, screenStream));
+            });
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    function stopScreen() {
+        inScreen = false;
+        btnScreen.classList.remove('active');
+        btnScreen.innerText = 'Share Screen';
+        if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
+        removeVideoElement('me');
+        if (videoGrid.children.length === 0) videoGrid.classList.add('hidden');
+        cleanupDeadConnections();
+    }
+
+    function cleanupDeadConnections() {
+        if (!inVoice && !inScreen) {
+            Object.keys(peerConnections).forEach(id => {
+                peerConnections[id].close();
+                delete peerConnections[id];
+            });
+        }
     }
 
     function createPeerConnection(targetId, isOfferor) {
         if (peerConnections[targetId]) return peerConnections[targetId];
+        
         const pc = new RTCPeerConnection(rtcConfig);
         peerConnections[targetId] = pc;
+
         if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+        if (screenStream) screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
+
         pc.onicecandidate = (e) => e.candidate && sendSignal(targetId, { ice: e.candidate });
+        
         pc.ontrack = (e) => {
-            const audio = new Audio(); audio.srcObject = e.streams[0]; audio.play();
+            const stream = e.streams[0];
+            if (e.track.kind === 'video') {
+                videoGrid.classList.remove('hidden');
+                const peer = peers.find(p => p.id === targetId);
+                addVideoElement(targetId, stream, peer ? peer.username : 'Peer');
+            } else {
+                const audio = new Audio();
+                audio.srcObject = stream;
+                audio.play();
+            }
         };
+
         if (isOfferor) {
             pc.createOffer().then(o => pc.setLocalDescription(o)).then(() => sendSignal(targetId, { sdp: pc.localDescription }));
         }
+
         return pc;
     }
 
     async function handleSignal(fromId, data) {
-        if (!inVoice) return;
         let pc = peerConnections[fromId];
         if (data.sdp) {
             if (!pc) pc = createPeerConnection(fromId, false);
@@ -396,6 +494,29 @@
         } else if (data.ice && pc) {
             await pc.addIceCandidate(new RTCIceCandidate(data.ice));
         }
+    }
+
+    function addVideoElement(id, stream, label) {
+        removeVideoElement(id);
+        const container = document.createElement('div');
+        container.id = `video-${id}`;
+        container.className = 'video-container';
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.autoplay = true;
+        video.playsInline = true;
+        if (id === 'me') video.muted = true;
+        const divLabel = document.createElement('div');
+        divLabel.className = 'video-label';
+        divLabel.innerText = label;
+        container.appendChild(video);
+        container.appendChild(divLabel);
+        videoGrid.appendChild(container);
+    }
+
+    function removeVideoElement(id) {
+        const el = document.getElementById(`video-${id}`);
+        if (el) el.remove();
     }
 
     function sendSignal(targetId, data) {
@@ -439,6 +560,7 @@
 
     btnLogout.onclick = () => { localStorage.removeItem(STORAGE_KEY); window.location.reload(); };
     btnVoice.onclick = toggleVoice;
+    btnScreen.onclick = toggleScreen;
     connect();
   </script>
 </body>
