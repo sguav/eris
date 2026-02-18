@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -71,7 +72,7 @@
     }
     header {
       background: var(--card);
-      padding: 1rem;
+      padding: 0.8rem 1rem;
       border-radius: 8px;
       display: flex;
       justify-content: space-between;
@@ -79,8 +80,8 @@
       margin-bottom: 1rem;
     }
     .status-dot {
-      width: 10px;
-      height: 10px;
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
       display: inline-block;
       margin-right: 5px;
@@ -90,7 +91,7 @@
     
     #messages {
       flex: 1;
-      background: rgba(255,255,255,0.03);
+      background: rgba(255,255,255,0.02);
       border-radius: 8px;
       padding: 1rem;
       overflow-y: auto;
@@ -110,12 +111,12 @@
       color: var(--dim);
       font-style: italic;
       text-align: center;
-      font-size: 0.9rem;
+      font-size: 0.85rem;
     }
     .msg-error {
       color: var(--error);
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.2);
+      background: rgba(239, 68, 68, 0.05);
+      border: 1px solid rgba(239, 68, 68, 0.1);
     }
     .msg-author {
       color: var(--accent);
@@ -147,7 +148,14 @@
       cursor: pointer;
     }
     button:hover { opacity: 0.9; }
-    button:disabled { background: var(--dim); cursor: not-allowed; }
+    button.secondary {
+        background: transparent;
+        border: 1px solid #27272a;
+        color: var(--dim);
+        padding: 0.4rem 0.8rem;
+        font-size: 0.8rem;
+    }
+    button.secondary:hover { color: white; border-color: var(--dim); }
 
     /* Voice UI */
     .peer-list {
@@ -161,9 +169,9 @@
         gap: 0.5rem;
         padding: 0.5rem;
         border-radius: 4px;
+        font-size: 0.9rem;
     }
     .peer-item:hover { background: rgba(255,255,255,0.05); }
-    .voice-active { color: var(--success); }
     
     #voice-controls {
         margin-top: auto;
@@ -193,18 +201,19 @@
         <ul id="peer-list" class="peer-list"></ul>
         
         <div id="voice-controls">
-            <button id="btn-voice" class="btn-voice">
-                Join Voice
-            </button>
+            <button id="btn-voice" class="btn-voice">Join Voice</button>
         </div>
     </div>
 
     <div class="main-area">
         <header>
-          <h1 style="margin:0; font-size: 1.2rem;">🌑 ERIS UNIFIED</h1>
-          <div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <h1 style="margin:0; font-size: 1.1rem;">🌑 ERIS</h1>
             <span id="status-dot" class="status-dot disconnected"></span>
-            <span id="status-text" style="color: var(--dim); font-size: 0.9rem;">Connecting...</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 1rem;">
+            <span id="my-name-display" style="font-size: 0.9rem; color: var(--accent); font-weight: bold;"></span>
+            <button id="btn-logout" class="secondary">Logout</button>
           </div>
         </header>
 
@@ -218,63 +227,63 @@
   </div>
 
   <script>
+    const STORAGE_KEY = 'eris_username';
+    
     const loginScreen = document.getElementById('login-screen');
     const chatUI = document.getElementById('chat-ui');
     const loginForm = document.getElementById('login-form');
     const usernameInput = document.getElementById('username-input');
     const loginError = document.getElementById('login-error');
     const loginBtn = document.getElementById('login-btn');
+    const myNameDisplay = document.getElementById('my-name-display');
+    const btnLogout = document.getElementById('btn-logout');
     
     const msgContainer = document.getElementById('messages');
     const chatForm = document.getElementById('chat-form');
     const chatInput = document.getElementById('chat-input');
     const statusDot = document.getElementById('status-dot');
-    const statusText = document.getElementById('status-text');
     const peerListEl = document.getElementById('peer-list');
     const btnVoice = document.getElementById('btn-voice');
 
     let ws;
-    let myUsername = '';
+    let myUsername = localStorage.getItem(STORAGE_KEY) || '';
     let myId = '';
     let peers = [];
     
-    // WebRTC state
     let localStream = null;
-    let peerConnections = {}; // target_id -> RTCPeerConnection
+    let peerConnections = {};
     let inVoice = false;
 
-    const rtcConfig = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
-    };
+    const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
     function connect() {
+      // Use explicit IP if localhost to avoid Firefox IPv6 slowness in some setups
+      const host = window.location.hostname === 'localhost' ? '127.0.0.1:' + window.location.port : window.location.host;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      
+      ws = new WebSocket(`${protocol}//${host}/ws`);
 
       ws.onopen = () => {
         statusDot.className = 'status-dot connected';
-        statusText.innerText = 'Connected';
         if (myUsername) sendLogin(myUsername);
       };
 
       ws.onclose = () => {
         statusDot.className = 'status-dot disconnected';
-        statusText.innerText = 'Disconnected';
-        setTimeout(connect, 2000);
+        setTimeout(connect, 1000);
       };
 
       ws.onmessage = async (event) => {
         const msg = JSON.parse(event.data);
-        
         switch (msg.type) {
             case 'Identify':
                 myId = msg.payload.id;
+                myUsername = msg.payload.username;
+                localStorage.setItem(STORAGE_KEY, myUsername);
+                myNameDisplay.innerText = myUsername;
                 loginScreen.classList.add('hidden');
                 chatUI.classList.remove('hidden');
-                addMessage({ type: 'System', payload: { message: `Welcome, ${msg.payload.username}!`, severity: 'info' }});
+                addMessage({ type: 'System', payload: { message: `Reconnected as ${myUsername}`, severity: 'info' }});
                 break;
             case 'PeerList':
                 peers = msg.payload.peers;
@@ -290,6 +299,7 @@
                 if (msg.payload.severity === 'error' && !myId) {
                     loginError.innerText = msg.payload.message;
                     loginBtn.disabled = false;
+                    localStorage.removeItem(STORAGE_KEY);
                 } else {
                     addMessage(msg);
                 }
@@ -300,21 +310,16 @@
 
     function renderPeers() {
         peerListEl.innerHTML = peers
-            .filter(p => p.id !== myId)
             .map(p => `
-                <li class="peer-item" id="peer-${p.id}">
+                <li class="peer-item">
                     <span class="status-dot connected"></span>
-                    <span>${p.username}</span>
+                    <span style="${p.id === myId ? 'color: var(--accent); font-weight: bold;' : ''}">${p.username} ${p.id === myId ? '(You)' : ''}</span>
                 </li>
             `).join('');
     }
 
     async function toggleVoice() {
-        if (inVoice) {
-            stopVoice();
-        } else {
-            await startVoice();
-        }
+        if (inVoice) stopVoice(); else await startVoice();
     }
 
     async function startVoice() {
@@ -323,14 +328,9 @@
             inVoice = true;
             btnVoice.classList.add('active');
             btnVoice.innerText = 'Leave Voice';
-            
-            // Notify others by sending an offer to everyone
-            peers.filter(p => p.id !== myId).forEach(peer => {
-                createPeerConnection(peer.id, true);
-            });
+            peers.filter(p => p.id !== myId).forEach(peer => createPeerConnection(peer.id, true));
         } catch (err) {
-            console.error("Mic access denied", err);
-            addMessage({ type: 'System', payload: { message: "Microphone access denied", severity: 'error' }});
+            addMessage({ type: 'System', payload: { message: "Mic access denied", severity: 'error' }});
         }
     }
 
@@ -338,74 +338,43 @@
         inVoice = false;
         btnVoice.classList.remove('active');
         btnVoice.innerText = 'Join Voice';
-        
-        if (localStream) {
-            localStream.getTracks().forEach(track => track.stop());
-            localStream = null;
-        }
-        
-        Object.keys(peerConnections).forEach(id => {
-            peerConnections[id].close();
-            delete peerConnections[id];
-        });
+        if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+        Object.keys(peerConnections).forEach(id => { peerConnections[id].close(); delete peerConnections[id]; });
     }
 
     function createPeerConnection(targetId, isOfferor) {
         if (peerConnections[targetId]) return peerConnections[targetId];
-
         const pc = new RTCPeerConnection(rtcConfig);
         peerConnections[targetId] = pc;
-
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
-        pc.onicecandidate = (event) => {
-            if (event.candidate) {
-                sendSignal(targetId, { ice: event.candidate });
-            }
+        if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+        pc.onicecandidate = (e) => e.candidate && sendSignal(targetId, { ice: e.candidate });
+        pc.ontrack = (e) => {
+            const audio = new Audio(); audio.srcObject = e.streams[0]; audio.play();
         };
-
-        pc.ontrack = (event) => {
-            const remoteAudio = new Audio();
-            remoteAudio.srcObject = event.streams[0];
-            remoteAudio.play();
-            addMessage({ type: 'System', payload: { message: "Voice connected with a peer", severity: 'info' }});
-        };
-
         if (isOfferor) {
-            pc.createOffer().then(offer => {
-                return pc.setLocalDescription(offer);
-            }).then(() => {
-                sendSignal(targetId, { sdp: pc.localDescription });
-            });
+            pc.createOffer().then(o => pc.setLocalDescription(o)).then(() => sendSignal(targetId, { sdp: pc.localDescription }));
         }
-
         return pc;
     }
 
     async function handleSignal(fromId, data) {
-        if (!inVoice) return; // Ignore signals if not in voice
-
+        if (!inVoice) return;
         let pc = peerConnections[fromId];
-        
         if (data.sdp) {
             if (!pc) pc = createPeerConnection(fromId, false);
-            
             await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
             if (data.sdp.type === 'offer') {
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
+                const a = await pc.createAnswer();
+                await pc.setLocalDescription(a);
                 sendSignal(fromId, { sdp: pc.localDescription });
             }
-        } else if (data.ice) {
-            if (pc) await pc.addIceCandidate(new RTCIceCandidate(data.ice));
+        } else if (data.ice && pc) {
+            await pc.addIceCandidate(new RTCIceCandidate(data.ice));
         }
     }
 
     function sendSignal(targetId, data) {
-        ws.send(JSON.stringify({
-            type: 'Signal',
-            payload: { target_id: targetId, data }
-        }));
+        ws.send(JSON.stringify({ type: 'Signal', payload: { target_id: targetId, data } }));
     }
 
     function sendLogin(username) {
@@ -431,7 +400,6 @@
       const user = usernameInput.value.trim();
       if (!user) return;
       myUsername = user;
-      loginError.innerText = '';
       loginBtn.disabled = true;
       if (ws.readyState === WebSocket.OPEN) sendLogin(user);
     };
@@ -444,8 +412,12 @@
       chatInput.value = '';
     };
 
-    btnVoice.onclick = toggleVoice;
+    btnLogout.onclick = () => {
+        localStorage.removeItem(STORAGE_KEY);
+        window.location.reload();
+    };
 
+    btnVoice.onclick = toggleVoice;
     connect();
   </script>
 </body>

@@ -87,7 +87,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let mut my_username = String::new();
 
     // --- LOGIN HANDSHAKE ---
-    while let Some(Ok(Message::Text(text))) = receiver.next().await {
+    while let Some(msg_res) = receiver.next().await {
+        let Ok(msg) = msg_res else { break; };
+        
+        // Skip non-text messages during handshake (e.g. Ping)
+        let Message::Text(text) = msg else { continue; };
+        
         if let Ok(Protocol::Login { username }) = serde_json::from_str::<Protocol>(&text) {
             let name = username.trim();
             if name.is_empty() { continue; }
@@ -109,8 +114,8 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             state.peers.insert(my_id, Peer { username: my_username.clone(), tx: peer_tx.clone() });
             
             let ident = Protocol::Identify { id: my_id, username: my_username.clone() };
-            if let Ok(msg) = serde_json::to_string(&ident) {
-                let _ = sender.send(Message::Text(msg)).await;
+            if let Ok(msg_json) = serde_json::to_string(&ident) {
+                let _ = sender.send(Message::Text(msg_json)).await;
             }
             
             let _ = state.broadcast_tx.send(Protocol::System { 
